@@ -5,7 +5,7 @@
 
 #include <cstdio>
 #include <vector>
-#include <glad/glad.h>
+#include <glad/gl.h>
 #include <GLFW/glfw3.h>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/transform.hpp>
@@ -261,7 +261,7 @@ bool initOpenGL()
   glfwMakeContextCurrent(mainWindow.handle);
 
   // Check that GLAD .dll loader and symbol imported is ready
-  if (!gladLoadGL()) {
+  if (!gladLoadGL(glfwGetProcAddress)) {
     printf("GLAD failed!\n");
     return false;
   }

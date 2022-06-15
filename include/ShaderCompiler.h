@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include <glad/glad.h>
+#include <glad/gl.h>
 
 // Simple class for compiling shaders
 class ShaderCompiler

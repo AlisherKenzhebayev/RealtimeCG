@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include <glad/glad.h>
+#include <glad/gl.h>
 
 // Vertex containing vec3 position
 struct Vertex_Pos
