@@ -31,3 +31,6 @@ The only difference from past years is that depth is mapped in the traditional
 [OpenGL way of [-1, 1]](https://www.khronos.org/registry/OpenGL/extensions/ARB/ARB_clip_control.txt)
 which prevents better utilization of the depth buffer precision.
 Project `08-Flocking` uses compute shaders which require OpenGL 4.3, though, so I'll keep the sources as they are.
+
+## Note from AKenzhebayev
+All MSAA-enabled projects with enabled tonemapping seem to somehow be losing the final render texture 

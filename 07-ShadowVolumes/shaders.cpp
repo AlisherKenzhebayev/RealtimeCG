@@ -115,6 +115,17 @@ bool compileShaders()
   }
   uniformBlockBinding(shaderProgram[ShaderProgram::DefaultDepthPass]);
 
+  // Shader program for non-instanced geometry w/o color
+  shaderProgram[ShaderProgram::LightSourceDepthPass] = glCreateProgram();
+  glAttachShader(shaderProgram[ShaderProgram::LightSourceDepthPass], vertexShader[VertexShader::LightSourceDepth]);
+  glAttachShader(shaderProgram[ShaderProgram::LightSourceDepthPass], fragmentShader[FragmentShader::Null]);
+  if (!ShaderCompiler::LinkProgram(shaderProgram[ShaderProgram::LightSourceDepthPass]))
+  {
+      cleanUp();
+      return false;
+  }
+  uniformBlockBinding(shaderProgram[ShaderProgram::LightSourceDepthPass]);
+
   // Shader program for instanced geometry w/ color
   shaderProgram[ShaderProgram::Instancing] = glCreateProgram();
   glAttachShader(shaderProgram[ShaderProgram::Instancing], vertexShader[VertexShader::Instancing]);

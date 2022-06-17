@@ -12,7 +12,7 @@ namespace ShaderProgram
 {
   enum
   {
-    Default, DefaultDepthPass, Instancing, InstancingDepthPass, InstancedShadowVolume, PointRendering, Tonemapping, NumShaderPrograms
+    Default, DefaultDepthPass, Instancing, InstancingDepthPass, InstancedShadowVolume, PointRendering, Tonemapping, LightSourceDepthPass, NumShaderPrograms
   };
 }
 
@@ -29,7 +29,7 @@ namespace VertexShader
 {
   enum
   {
-    Default, Instancing, InstancedShadowVolume, Point, ScreenQuad, NumVertexShaders
+    Default, Instancing, InstancedShadowVolume, Point, ScreenQuad, LightSourceDepth, NumVertexShaders
   };
 }
 
@@ -265,6 +265,30 @@ void main()
   gl_Position = vec4(position[gl_VertexID].xyz, 1.0f);
 }
 )",
+// ----------------------------------------------------------------------------
+// Light source depth vertex shader
+// ----------------------------------------------------------------------------
+R"(
+#version 330 core
+
+// The following is not not needed since GLSL version #430
+#extension GL_ARB_explicit_uniform_location : require
+
+// The following is not not needed since GLSL version #420
+#extension GL_ARB_shading_language_420pack : require
+
+layout (location = 0) in vec3 position;
+
+// Uniform blocks, i.e. constants
+layout (location = 0) uniform mat4 model;
+layout (location = 1) uniform mat4 lightView;
+layout (location = 2) uniform mat4 lightProjection;
+
+void main()
+{
+    gl_Position = lightProjection * lightView * model * vec4(position, 1.0);
+}
+)"
 ""};
 
 // ============================================================================

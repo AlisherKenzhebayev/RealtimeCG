@@ -16,6 +16,10 @@
 #include "shaders.h"
 #include "scene.h"
 
+#include <string>
+#include <iostream>
+using namespace std;
+
 // Set to 1 to create debugging context that reports errors, requires OpenGL 4.3!
 #define _ENABLE_OPENGL_DEBUG 0
 
@@ -468,66 +472,74 @@ void processInput(float dt)
   }
 }
 
-void renderScene()
+void renderScene(int pointLights, int spotLights)
 {
-  // Bind the framebuffer
-  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    for (int light = 0; light < pointLights; light++)
+    {
+        // Deal with the shadow maps
+        // Bind the framebuffer and render the light source to depth map
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        scene.DrawDepthSingleSpotLight(camera, renderMode, light);
+    }
+    
+    // Bind the framebuffer
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 
-  // Draw our scene
-  scene.Draw(camera, renderMode, carmackReverse);
-
-  // Unbind the shader program and other resources
-  glBindVertexArray(0);
-  glUseProgram(0);
-
-  if (renderMode.tonemapping)
-  {
-    // Unbind the framebuffer and bind the window system provided FBO
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    // Solid fill always
-    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-
-    // Disable multisampling and depth test
-    glDisable(GL_MULTISAMPLE);
-    glDisable(GL_DEPTH_TEST);
-
-    // Clear the color
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    // Tonemapping
-    glUseProgram(shaderProgram[ShaderProgram::Tonemapping]);
-
-    // Send in the required data
-    glUniform1f(0, (float)renderMode.msaaLevel);
-
-    // Bind the HDR render target as texture
-    GLenum target = (renderMode.msaaLevel > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(target, renderTarget);
-    glBindSampler(0, 0); // Very important!
-
-    // Draw fullscreen quad
-    glBindVertexArray(scene.GetGenericVAO());
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+    // Draw our scene
+    scene.Draw(camera, renderMode, carmackReverse);
 
     // Unbind the shader program and other resources
     glBindVertexArray(0);
     glUseProgram(0);
-  }
-  else
-  {
-    // Just copy the render target to the screen
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
-    glDrawBuffer(GL_BACK);
-    glBlitFramebuffer(0, 0, mainWindow.width, mainWindow.height, 0, 0, mainWindow.width, mainWindow.height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-  }
+
+    if (renderMode.tonemapping)
+    {
+        // Unbind the framebuffer and bind the window system provided FBO
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        // Solid fill always
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+        // Disable multisampling and depth test
+        glDisable(GL_MULTISAMPLE);
+        glDisable(GL_DEPTH_TEST);
+
+        // Clear the color
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        // Tonemapping
+        glUseProgram(shaderProgram[ShaderProgram::Tonemapping]);
+
+        // Send in the required data
+        glUniform1f(0, (float)renderMode.msaaLevel);
+
+        // Bind the HDR render target as texture
+        GLenum target = (renderMode.msaaLevel > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(target, renderTarget);
+        glBindSampler(0, 0); // Very important!
+
+        // Draw fullscreen quad
+        glBindVertexArray(scene.GetGenericVAO());
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        // Unbind the shader program and other resources
+        glBindVertexArray(0);
+        glUseProgram(0);
+    }
+    else
+    {
+        // Just copy the render target to the screen
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+        glDrawBuffer(GL_BACK);
+        glBlitFramebuffer(0, 0, mainWindow.width, mainWindow.height, 0, 0, mainWindow.width, mainWindow.height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    }
 }
 
 // Helper method for implementing the application main loop
-void mainLoop()
+void mainLoop(int pointLights, int spotLights)
 {
   static double prevTime = 0.0;
   while (!glfwWindowShouldClose(mainWindow.handle))
@@ -554,7 +566,7 @@ void mainLoop()
       scene.Update(dt);
 
     // Render the scene
-    renderScene();
+    renderScene(pointLights, spotLights);
 
     // Swap actual buffers on the GPU
     glfwSwapBuffers(mainWindow.handle);
@@ -579,11 +591,14 @@ int main()
     return -1;
   }
 
+  int pointLights = 2;
+  int spotLights = 2;
+
   // Scene initialization
-  scene.Init(10, 5);
+  scene.Init(10, pointLights, spotLights);
 
   // Enter the application main loop
-  mainLoop();
+  mainLoop(pointLights, spotLights);
 
   // Release used resources and exit
   shutDown();

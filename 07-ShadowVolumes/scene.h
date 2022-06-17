@@ -43,8 +43,10 @@ public:
     ShadowVolume = 0x0002,
     DirectLight = 0x0004,
     AmbientLight = 0x0008,
+    ShadowMap = 0x0010,
     // Combinations
-    LightPass = 0x000c // diffuse | ambient
+    LightPass = 0x000c, // diffuse | ambient
+    ShadowPass = 0x0012 // sh.map | sh.volume
   };
 
   // Data for a single object instance
@@ -60,17 +62,19 @@ public:
   // Get and create instance for this singleton
   static Scene& GetInstance();
   // Initialize the test scene
-  void Init(int numCubes, int numLights);
+  void Init(int numCubes, int numPointLights, int numSpotLights);
   // Updates positions
   void Update(float dt);
   // Draw the scene
-  void Draw(const Camera &camera, const RenderMode &renderMode, bool carmackReverse);
+  void Draw(const Camera& camera, const RenderMode& renderMode, bool carmackReverse);
+  // Draw the scene
+  void DrawDepthSingleSpotLight(const Camera& camera, const RenderMode& renderMode, int);
   // Return the generic VAO for rendering
   GLuint GetGenericVAO() { return _vao; }
 
 private:
-  // Structure describing light
-  struct Light
+  // Structure describing a point light
+  struct PointLight
   {
     // Position of the light
     glm::vec3 position;
@@ -78,6 +82,22 @@ private:
     glm::vec4 color;
     // Parameters for the light movement
     glm::vec4 movement;
+  };
+
+  // Structure describing a spot light
+  struct SpotLight
+  {
+      // Position of the light
+      glm::vec3 position;
+      // Color and ambient intensity of the light
+      glm::vec4 color;
+      // Parameters for the light movement
+      glm::vec4 movement;
+      // Direction of the light cone
+      glm::vec3 direction;
+      // cutoff (as a cosine of angle, as per learnOpenGl)
+      float cutOff;
+      float outerCutOff;
   };
 
   // All is private, instance is created in GetInstance()
@@ -92,13 +112,18 @@ private:
   // Helper function for creating and updating the instance data
   void UpdateInstanceData();
   // Helper function for updating shader program data
-  void UpdateProgramData(GLuint program, RenderPass renderPass, const Camera &camera, const glm::vec3 &lightPosition, const glm::vec4 &lightColor);
+  void UpdateProgramData(GLuint program, RenderPass renderPass, const Camera &camera, const glm::vec3 &lightPosition, const glm::vec4 &lightColor,
+      const glm::vec3& lightDirection, const float& cutOff, const float& outerCutOff);
   // Helper method to update transformation uniform block
-  void UpdateTransformBlock(const Camera &camera);
+  void UpdateTransformBlock(const Camera& camera);
+  // Helper method to update transformation uniform block
+  void UpdateTransformBlockSingleSpotLight(const float&);
   // Draw the backdrop, floor and walls
-  void DrawBackground(GLuint program, RenderPass renderPass, const Camera &camera, const glm::vec3 &lightPosition, const glm::vec4 &lightColor);
+  void DrawBackground(GLuint program, RenderPass renderPass, const Camera &camera, const glm::vec3 &lightPosition, const glm::vec4 &lightColor,
+      const glm::vec3& lightDirection, const float& cutOff, const float& outerCutOff);
   // Draw cubes
-  void DrawObjects(GLuint program, RenderPass renderPass, const Camera &camera, const glm::vec3 &lightPosition, const glm::vec4 &lightColor);
+  void DrawObjects(GLuint program, RenderPass renderPass, const Camera &camera, const glm::vec3 &lightPosition, const glm::vec4 &lightColor,
+      const glm::vec3& lightDirection, const float& cutOff, const float& outerCutOff);
 
   // Textures helper instance
   Textures &_textures;
@@ -108,16 +133,23 @@ private:
   int _numCubes = 10;
   // Cube positions
   std::vector<glm::vec3> _cubePositions;
+
   // Number of lights in the scene
-  int _numLights;
+  int _numPointLights;
   // Lights positions
-  std::vector<Light> _lights;
+  std::vector<PointLight> _pointLights;
+
+  // Number of spot lights in the scene
+  int _numSpotLights;
+  // Lights positions
+  std::vector<SpotLight> _spotLights;
+
   // General use VAO
   GLuint _vao = 0;
   // Quad instance
   Mesh<Vertex_Pos_Nrm_Tgt_Tex> *_quad = nullptr;
   // Cube instance
-  Mesh<Vertex_Pos_Nrm_Tgt_Tex> *_cube = nullptr;
+  Mesh<Vertex_Pos_Nrm_Tgt_Tex>* _cube = nullptr;
   // Cube instance w/ adjacency information
   Mesh<Vertex_Pos> *_cubeAdjacency = nullptr;
   // Instancing buffer handle
