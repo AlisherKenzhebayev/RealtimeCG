@@ -298,7 +298,7 @@ namespace FragmentShader
 {
   enum
   {
-    Default, SingleColor, Null, Tonemapping, NumFragmentShaders
+    Default, SingleColor, Null, Tonemapping, Depth, NumFragmentShaders
   };
 }
 
@@ -331,6 +331,13 @@ layout (location = 4) uniform vec4 lightPosWS;
 layout (location = 5) uniform vec4 viewPosWS;
 // Light color
 layout (location = 6) uniform vec4 lightColor;
+
+// Light direction
+layout (location = 7) uniform vec3 lightDirection;
+// Spotlight cutoff (cosines)
+layout (location = 8) uniform float cutoff;
+// Spotlight outer cutoff (cosines)
+layout (location = 9) uniform float outerCutoff;
 
 // Fragment shader inputs
 in VertexData
@@ -367,6 +374,11 @@ void main()
   float length = sqrt(lengthSq);
   lightDir /= length;
 
+  // Calculate the angle between the -spotlight direction and lightDir
+  float theta = dot(normalize(lightDir), normalize(-lightDirection));
+  float epsilon   = cutoff - outerCutoff;
+  float intensity = clamp((theta - outerCutoff) / epsilon, 0.0, 1.0);    
+
   // Calculate the view and reflection/halfway direction
   vec3 viewDir = normalize(viewPosWS.xyz - vIn.worldPos.xyz);
   // Cheaper approximation of reflected direction = reflect(-lightDir, normal)
@@ -385,11 +397,21 @@ void main()
 
   // Calculate the Phong model terms: ambient, diffuse, specular
   vec3 ambient = ambientIntensity * occlusion * lightColor.rgb;
-  vec3 diffuse = directIntensity * horizon * NdotL * lightColor.rgb / lengthSq;
-  vec3 specular = directIntensity* horizon * specSample * lightColor.rgb * pow(NdotH, 64.0f) / lengthSq; // Defines shininess
+  vec3 diffuse = directIntensity * horizon * NdotL * lightColor.rgb;
+  vec3 specular = directIntensity* horizon * specSample * lightColor.rgb * pow(NdotH, 32.0f);   // Defines shininess
+  
+  // Spotlight, Soft edges
+  diffuse = diffuse * intensity;   
+  specular = specular * intensity;   
 
+  // Light attenuation with squared distance
+  diffuse = diffuse / lengthSq;
+  specular = specular / lengthSq;
+
+  vec3 finalColor;
+                                                   
   // Calculate the final color
-  vec3 finalColor = albedo * (ambient + diffuse) + specular;
+  finalColor = albedo * ambient + albedo * diffuse + specular;
   color = vec4(finalColor, 1.0f);
 }
 )",
@@ -411,7 +433,7 @@ void main()
 }
 )",
 // ----------------------------------------------------------------------------
-// Null fragment shader shader for depth and stencil passes
+// Null fragment shader for depth and stencil passes
 // ----------------------------------------------------------------------------
 R"(
 #version 330 core
@@ -468,6 +490,28 @@ void main()
   }
 
   color = vec4(finalColor.rgb / MSAA_LEVEL, 1.0f);
+}
+)",
+// ----------------------------------------------------------------------------
+// Depth shader shader for depth indication
+// ----------------------------------------------------------------------------
+R"(
+#version 330 core
+out vec4 color;
+
+float near = 0.1; 
+float far  = 100.0; 
+  
+float LinearizeDepth(float depth) 
+{
+    float z = depth * 2.0 - 1.0; // back to NDC 
+    return (2.0 * near * far) / (far + near - z * (far - near));	
+}
+
+void main()
+{             
+    float depth = LinearizeDepth(gl_FragCoord.z) / far; // divide by far for demonstration
+    color = vec4(vec3(depth), 1.0);
 }
 )",
 ""};

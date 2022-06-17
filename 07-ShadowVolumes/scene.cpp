@@ -182,7 +182,7 @@ void Scene::Init(int numCubes, int numPointLights, int numSpotLights)
 
       glm::vec3 origin = glm::vec3(0.0f);
 
-      _spotLights.push_back({ offset + lissajous(p, 0.0f) * scale, c, p, dir, glm::radians(12.5f), glm::radians(17.5f) });
+      _spotLights.push_back({ offset + lissajous(p, 0.0f) * scale, c, p, dir, glm::cos(glm::radians(12.5f)), glm::cos(glm::radians(17.5f)) });
   }
 
   // --------------------------------------------------------------------------
@@ -279,7 +279,7 @@ void Scene::UpdateInstanceData()
 }
 
 void Scene::UpdateProgramData(GLuint program, RenderPass renderPass, const Camera &camera, const glm::vec3 &lightPosition, const glm::vec4 &lightColor,
-    const glm::vec3& lightDirection, const float& cutOff, const float& outerCutOff)
+    const glm::vec3& lightDirection, const float& cutoff, const float& outerCutoff)
 {
   // Update the light position, use 4th component to pass direct light intensity
   if ((int)renderPass & ((int)RenderPass::ShadowPass | (int)RenderPass::LightPass))
@@ -299,6 +299,19 @@ void Scene::UpdateProgramData(GLuint program, RenderPass renderPass, const Camer
     // Update the light color, 4th component controls ambient light intensity
     GLint lightColorLoc = glGetUniformLocation(program, "lightColor");
     glUniform4f(lightColorLoc, lightColor.x, lightColor.y, lightColor.z, ((int)renderPass & (int)RenderPass::AmbientLight) ? lightColor.w : 0.0f);
+
+    //TODO: spotlight shader component updates
+    // Update the light direction
+    GLint lightDirectionLoc = glGetUniformLocation(program, "lightDirection");
+    glUniform3f(lightDirectionLoc, lightDirection.x, lightDirection.y, lightDirection.z);
+
+    // Update the spotlight cutoff
+    GLint cutoffLoc = glGetUniformLocation(program, "cutoff");
+    glUniform1f(cutoffLoc, cutoff);
+
+    // Update the spotlight cutoff
+    GLint outerCutoffLoc = glGetUniformLocation(program, "outerCutoff");
+    glUniform1f(outerCutoffLoc, outerCutoff);
   }
 }
 
@@ -307,15 +320,13 @@ void Scene::UpdateTransformBlockSingleSpotLight(const float& light)
     // Tell OpenGL we want to work with our transform block
     glBindBuffer(GL_UNIFORM_BUFFER, _transformBlockUBO);
 
-    // Update the world to view transformation matrix - transpose to 3 columns, 4 rows for storage in an uniform block:
-    // per std140 layout column matrix CxR is stored as an array of C columns with R elements, i.e., 4x3 matrix would
-    // waste space because it would require padding to vec4
+    // Similar 3x4 transpose as in the original General VS shader, but the view transformation is calculated relative to light
     glm::mat4x4 lightViewMatrix = glm::lookAt(_spotLights[light].position, _spotLights[light].position + _spotLights[light].direction, glm::vec3(0.0, 1.0, 0.0));
     glm::mat3x4 worldToView = glm::transpose(lightViewMatrix);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat3x4), static_cast<const void*>(&*glm::value_ptr(worldToView)));
 
     float near_plane = 0.1f;
-    float far_plane = 1000.1f;
+    float far_plane = 1000.0f;
     const unsigned int SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
     glm::mat4x4 lightProjectionMatrix = glm::perspective(glm::radians(45.0f), (GLfloat)SHADOW_WIDTH / (GLfloat)SHADOW_HEIGHT, near_plane, far_plane);
     // Update the projection matrix
@@ -445,6 +456,7 @@ void Scene::DrawObjects(GLuint program, RenderPass renderPass, const Camera &cam
   }
 }
 
+// Do a depth pass for a single spotlight
 void Scene::DrawDepthSingleSpotLight(const Camera& camera, const RenderMode& renderMode, int light) {
     UpdateTransformBlockSingleSpotLight(light);
     
@@ -483,15 +495,11 @@ void Scene::DrawDepthSingleSpotLight(const Camera& camera, const RenderMode& ren
 
     // Clear the color and depth buffer
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-    // Render the scene into the depth buffer only, disable color write
-    glColorMask(false, false, false, false);
+    // Render the scene into the depth buffer
+    //TODO: glColorMask(false, false, false, false);
     depthPass();
-
-    // We primed the depth buffer, no need to write to it anymore
-    // Note: for depth primed geometry, it would be the best option to also set depth function to GL_EQUAL
-    glDepthMask(GL_FALSE);
 }
 
 void Scene::Draw(const Camera &camera, const RenderMode &renderMode, bool carmackReverse)
@@ -512,13 +520,13 @@ void Scene::Draw(const Camera &camera, const RenderMode &renderMode, bool carmac
 
   // --------------------------------------------------------------------------
   // Depth pass for a spotlight:
-  // TODO: depth pass doesnt need lightinfo, this is a mistake
+  // TODO: depth pass doesnt need lightinfo, this is BS
   // --------------------------------------------------------------------------
   auto spotLightSourceDepthPass = [this, &renderMode, &camera](const glm::vec3& lightPosition, const glm::vec4& lightColor, 
       const glm::vec3& lightDirection, const float& cutOff, const float& outerCutOff)
   {
       // Add the uniform of light projection and view matrices
-      float near_plane = 1.0f, far_plane = 7.5f;
+      float near_plane = 1.0f, far_plane = 1000.1f;
       const unsigned int SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
       glm::mat4x4 lightProjectionMatrix = glm::perspective(glm::radians(45.0f), (GLfloat)SHADOW_WIDTH / (GLfloat)SHADOW_HEIGHT, near_plane, far_plane);
       GLint loc = glGetUniformLocation(shaderProgram[ShaderProgram::LightSourceDepthPass], "lightProjection");
@@ -538,23 +546,24 @@ void Scene::Draw(const Camera &camera, const RenderMode &renderMode, bool carmac
   // --------------------------------------------------------------------------
   // Light pass drawing:
   // --------------------------------------------------------------------------
-  auto lightPass = [this, &renderMode, &camera](RenderPass renderPass, const glm::vec3 &lightPosition, const glm::vec4 &lightColor)
+  auto lightPass = [this, &renderMode, &camera](RenderPass renderPass, const glm::vec3 &lightPosition, const glm::vec4 &lightColor,
+      const glm::vec3& lightDirection, const float& cutOff, const float& outerCutOff)
   {
     // Enable additive alpha blending
     glEnable(GL_BLEND);
     glBlendEquation(GL_FUNC_ADD);
     glBlendFunc(GL_ONE, GL_ONE);
 
-    // Pass only if equal to 0, i.e., outside shadow volume
-    glStencilFunc(GL_EQUAL, 0x00, 0xff);
+    //// Pass only if equal to 0, i.e., outside shadow volume
+    //glStencilFunc(GL_EQUAL, 0x00, 0xff);
 
-    // Don't update the stencil buffer
-    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+    //// Don't update the stencil buffer
+    //glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 
     DrawBackground(shaderProgram[ShaderProgram::Default], renderPass, camera, lightPosition, lightColor, 
-        glm::vec3(0.0f), 0.0f, 0.0f);
+        lightDirection, cutOff, outerCutOff);
     DrawObjects(shaderProgram[ShaderProgram::Instancing], renderPass, camera, lightPosition, lightColor,
-        glm::vec3(0.0f), 0.0f, 0.0f);
+        lightDirection, cutOff, outerCutOff);
 
     // Disable blending after this pass
     glDisable(GL_BLEND);
@@ -587,7 +596,7 @@ void Scene::Draw(const Camera &camera, const RenderMode &renderMode, bool carmac
     }
 
     DrawObjects(shaderProgram[ShaderProgram::InstancedShadowVolume], RenderPass::ShadowVolume, camera, lightPosition, lightColor, 
-        glm::vec3(0.0f), 0.0f, 0.0f);
+        glm::vec3(1.0f), glm::cos(glm::radians(180.0f)), glm::cos(glm::radians(180.0f)));
 
     // Enable it back again
     glEnable(GL_CULL_FACE);
@@ -636,27 +645,25 @@ void Scene::Draw(const Camera &camera, const RenderMode &renderMode, bool carmac
     glClear(GL_STENCIL_BUFFER_BIT);
     glEnable(GL_STENCIL_TEST);
 
-    // Draw shadow volumes first, disable color write
-    glColorMask(false, false, false, false);
-    shadowVolumePass(_pointLights[i].position, _pointLights[i].color);
+    //// Draw shadow volumes first, disable color write
+    //glColorMask(false, false, false, false);
+    //shadowVolumePass(_pointLights[i].position, _pointLights[i].color);
 
     // Draw direct light utilizing stenciled shadows, enable color write
     glColorMask(true, true, true, true);
-    lightPass(RenderPass::DirectLight, _pointLights[i].position, _pointLights[i].color);
+    lightPass(RenderPass::DirectLight, _pointLights[i].position, _pointLights[i].color, 
+        glm::vec3(1.0f), glm::cos(glm::radians(180.0f)), glm::cos(glm::radians(180.0f)));
 
     // Disable stencil test as we don't want shadows to affect ambient light
     glDisable(GL_STENCIL_TEST);
-    lightPass(RenderPass::AmbientLight, _pointLights[i].position, _pointLights[i].color);
+    lightPass(RenderPass::AmbientLight, _pointLights[i].position, _pointLights[i].color,
+        glm::vec3(1.0f), glm::cos(glm::radians(180.0f)), glm::cos(glm::radians(180.0f)));
   }
-
-  // -------------> 
-  // SPOT Lights
-  // -------------> 
 
   // For each spot light we need to render the scene with a shadow map
   for (int i = 0; i < _numSpotLights; ++i)
   {
-      // I don't need stencil for shadow maps
+      // Enable stencil test and clear the stencil buffer
       glClear(GL_STENCIL_BUFFER_BIT);
       glDisable(GL_STENCIL_TEST);
 
@@ -664,13 +671,15 @@ void Scene::Draw(const Camera &camera, const RenderMode &renderMode, bool carmac
       //glColorMask(false, false, false, false);
       //spotLightSourceDepthPass(_spotLights[i].position, _spotLights[i].color, _spotLights[i].direction, _spotLights[i].cutOff, _spotLights[i].outerCutOff);
 
-      //// Draw direct light utilizing stenciled shadows, enable color write
-      //glColorMask(true, true, true, true);
-      //lightPass(RenderPass::DirectLight, _spotLights[i].position, _spotLights[i].color);
+      // Draw direct light utilizing stenciled shadows, enable color write
+      glColorMask(true, true, true, true);
+      lightPass(RenderPass::DirectLight, _spotLights[i].position, _spotLights[i].color,
+          _spotLights[i].direction, _spotLights[i].cutOff, _spotLights[i].outerCutOff);
 
       // Disable stencil test as we don't want shadows to affect ambient light
       glDisable(GL_STENCIL_TEST);
-      lightPass(RenderPass::AmbientLight, _spotLights[i].position, _spotLights[i].color);
+      lightPass(RenderPass::AmbientLight, _spotLights[i].position, _spotLights[i].color,
+          _spotLights[i].direction, _spotLights[i].cutOff, _spotLights[i].outerCutOff);
   }
 
   // Don't forget to leave the color write enabled

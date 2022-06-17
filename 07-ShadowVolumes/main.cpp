@@ -111,8 +111,8 @@ bool carmackReverse = true;
 GLuint fbo = 0;
 // Our render target for rendering
 GLuint renderTarget = 0;
-// Our depth stencil for rendering
-GLuint depthStencil = 0;
+// The depth map texture to be used in sptlight shadow maps
+GLuint depthMap = 0;
 
 // ----------------------------------------------------------------------------
 
@@ -138,7 +138,9 @@ void resizeCallback(GLFWwindow* window, int width, int height)
 {
   mainWindow.width = width;
   mainWindow.height = height;
+
   glViewport(0, 0, width, height);
+  
   camera.SetProjection(fov, (float)width / (float)height, nearClipPlane, farClipPlane);
 
   createFramebuffer(width, height, renderMode.msaaLevel);
@@ -354,33 +356,50 @@ void createFramebuffer(int width, int height, GLsizei MSAA)
   }
 
   // --------------------------------------------------------------------------
-  // Depth/stencil buffer texture:
+  // Depth render target texture (single light):
   // --------------------------------------------------------------------------
 
-  // Delete it if necessary
-  if (glIsRenderbuffer(depthStencil))
+  if (glIsTexture(depthMap))
   {
-    glDeleteRenderbuffers(1, &depthStencil);
-    depthStencil = 0;
+      glDeleteTextures(1, &depthMap);
+      depthMap = 0;
   }
 
-  // Create the depth-stencil name
-  if (depthStencil == 0)
+  // Create texture name
+  if (depthMap == 0)
   {
-    glGenRenderbuffers(1, &depthStencil);
+      glGenTextures(1, &depthMap);
   }
 
-  // Bind and recreate the depth-stencil Render Buffer Object
-  glBindRenderbuffer(GL_RENDERBUFFER, depthStencil);
+  // Bind and recreate the render target texture
   if (MSAA > 1)
   {
-    glRenderbufferStorageMultisample(GL_RENDERBUFFER, MSAA, GL_DEPTH24_STENCIL8, width, height);
+      glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, depthMap);
+      glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, MSAA, GL_RGB16F, width, height, GL_TRUE);
+
+      glTexParameteri(GL_TEXTURE_2D_MULTISAMPLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D_MULTISAMPLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D_MULTISAMPLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+      glTexParameteri(GL_TEXTURE_2D_MULTISAMPLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+      float borderColor[] = { 1.0, 1.0, 1.0, 1.0 };
+      glTexParameterfv(GL_TEXTURE_2D_MULTISAMPLE, GL_TEXTURE_BORDER_COLOR, borderColor);
+
+      // Attach the texture to framebuffer
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D_MULTISAMPLE, depthMap, 0);      
   }
   else
   {
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+      glBindTexture(GL_TEXTURE_2D, depthMap);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+      float borderColor[] = { 1.0, 1.0, 1.0, 1.0 };
+      glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+      // Attach the texture to framebuffer
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap, 0);
   }
-  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, depthStencil);
 
   // Set the list of draw buffers.
   GLenum drawBuffers[] = {GL_COLOR_ATTACHMENT0};
@@ -408,7 +427,7 @@ void shutDown()
 
   // Release the framebuffer
   glDeleteTextures(1, &renderTarget);
-  glDeleteRenderbuffers(1, &depthStencil);
+  glDeleteTextures(1, &depthMap);
   glDeleteFramebuffers(1, &fbo);
 
   // Release the window
@@ -474,14 +493,35 @@ void processInput(float dt)
 
 void renderScene(int pointLights, int spotLights)
 {
-    for (int light = 0; light < pointLights; light++)
+    // Change viewport to depth map size for shadowmaps
+    glViewport(0, 0, mainWindow.width, mainWindow.height);
+    
+    // The shadowmap pass
+    for (int spot = 0; spot < spotLights; spot++)
     {
         // Deal with the shadow maps
         // Bind the framebuffer and render the light source to depth map
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-        scene.DrawDepthSingleSpotLight(camera, renderMode, light);
+        glClear(GL_DEPTH_BUFFER_BIT);
+        
+        /*// Attempt to blit the 07-Volumes* render buffer to a texture, apparently that is not an option.
+        glDrawBuffer(depthMap);
+        glReadBuffer(depthStencil);
+        glBlitFramebuffer(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT, 0, 0, SHADOW_WIDTH, SHADOW_HEIGHT, GL_DEPTH_BUFFER_BIT, GL_LINEAR);*/
+
+        glActiveTexture(GL_TEXTURE0);
+        GLenum target = (renderMode.msaaLevel > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
+        glBindTexture(target, depthMap);
+
+        scene.DrawDepthSingleSpotLight(camera, renderMode, spot);
+
+        glBindTexture(target, 0);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
-    
+
+    // Change viewport back
+    glViewport(0, 0, mainWindow.width, mainWindow.height);
     // Bind the framebuffer
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 
