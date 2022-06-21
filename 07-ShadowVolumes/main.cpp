@@ -375,7 +375,7 @@ void createFramebuffer(int width, int height, GLsizei MSAA)
   if (MSAA > 1)
   {
       glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, depthMap);
-      glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, MSAA, GL_RGB16F, width, height, GL_TRUE);
+      glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, MSAA, GL_DEPTH_COMPONENT, width, height, GL_TRUE);
 
       glTexParameteri(GL_TEXTURE_2D_MULTISAMPLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
       glTexParameteri(GL_TEXTURE_2D_MULTISAMPLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -504,7 +504,7 @@ void renderScene(int pointLights, int spotLights)
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
         glClear(GL_DEPTH_BUFFER_BIT);
         
-        /*// Attempt to blit the 07-Volumes* render buffer to a texture, apparently that is not an option.
+        /*// Attempt to blit the 07-Volumes* render buffer to a texture, apparently that is not an option?
         glDrawBuffer(depthMap);
         glReadBuffer(depthStencil);
         glBlitFramebuffer(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT, 0, 0, SHADOW_WIDTH, SHADOW_HEIGHT, GL_DEPTH_BUFFER_BIT, GL_LINEAR);*/

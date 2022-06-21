@@ -641,6 +641,8 @@ void Scene::Draw(const Camera &camera, const RenderMode &renderMode, bool carmac
   // For each light we need to render the scene with its contribution
   for (int i = 0; i < _numPointLights; ++i)
   {
+    // Angle for pointlights is explained by the fact that pointlights can be simulated by a 180 degree half-angle spotlight
+
     // Enable stencil test and clear the stencil buffer
     glClear(GL_STENCIL_BUFFER_BIT);
     glEnable(GL_STENCIL_TEST);
