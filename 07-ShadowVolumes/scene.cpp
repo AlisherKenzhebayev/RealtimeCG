@@ -232,6 +232,18 @@ void Scene::Update(float dt)
   t += dt;
 }
 
+//void Scene::BindDepthTextures() {
+//    if (textureCubemapDepth != NULL) {
+//        glActiveTexture(GL_TEXTURE0 + 4);
+//        glBindTexture(GL_TEXTURE_CUBE_MAP, textureCubemapDepth);
+//    }
+//
+//    if (textureDepth != NULL) {
+//        glActiveTexture(GL_TEXTURE0 + 4);
+//        glBindTexture(GL_TEXTURE_2D, textureDepth);
+//    }
+//}
+
 void Scene::BindTextures(const GLuint &diffuse, const GLuint &normal, const GLuint &specular, const GLuint &occlusion)
 {
   // We want to bind textures and appropriate samplers
@@ -420,6 +432,22 @@ void Scene::DrawBackground(GLuint program, RenderPass renderPass, const Camera &
   passMatrix = transformation;
   glUniformMatrix4x3fv(0, 1, GL_FALSE, glm::value_ptr(passMatrix));
   glDrawElements(GL_TRIANGLES, _quad->GetIBOSize(), GL_UNSIGNED_INT, reinterpret_cast<void*>(0));
+
+  // Draw Z axis wall
+  transformation = glm::translate(glm::vec3(0.0f, 0.0f, -15.0f));
+  transformation *= glm::rotate(PI_HALF, glm::vec3(1.0f, 0.0f, 0.0f));
+  transformation *= glm::scale(glm::vec3(30.0f, 1.0f, 30.0f));
+  passMatrix = transformation;
+  glUniformMatrix4x3fv(0, 1, GL_FALSE, glm::value_ptr(passMatrix));
+  glDrawElements(GL_TRIANGLES, _quad->GetIBOSize(), GL_UNSIGNED_INT, reinterpret_cast<void*>(0));
+
+  // Draw X axis wall
+  transformation = glm::translate(glm::vec3(-15.0f, 0.0f, 0.0f));
+  transformation *= glm::rotate(-PI_HALF, glm::vec3(0.0f, 0.0f, 1.0f));
+  transformation *= glm::scale(glm::vec3(30.0f, 1.0f, 30.0f));
+  passMatrix = transformation;
+  glUniformMatrix4x3fv(0, 1, GL_FALSE, glm::value_ptr(passMatrix));
+  glDrawElements(GL_TRIANGLES, _quad->GetIBOSize(), GL_UNSIGNED_INT, reinterpret_cast<void*>(0));
 }
 
 void Scene::DrawObjects(GLuint program, RenderPass renderPass, const Camera &camera, const glm::vec3 &lightPosition, const glm::vec4 &lightColor,
@@ -486,6 +514,18 @@ void Scene::DrawLightSinglePointLight(const Camera& camera, const RenderMode& re
     UpdateTransformBlock(camera);
 
     // --------------------------------------------------------------------------
+    // Depth pass drawing:
+    // --------------------------------------------------------------------------
+    auto depthPass = [this, &renderMode, &camera]()
+    {
+        // No need to pass real light position and color as we don't need them in the depth pass
+        DrawBackground(shaderProgram[ShaderProgram::DefaultDepthPass], RenderPass::DepthPass, camera, glm::vec3(0.0f), glm::vec4(0.0f),
+            glm::vec3(0.0f), 0.0f, 0.0f);
+        DrawObjects(shaderProgram[ShaderProgram::InstancingDepthPass], RenderPass::DepthPass, camera, glm::vec3(0.0f), glm::vec4(0.0f),
+            glm::vec3(0.0f), 0.0f, 0.0f);
+    };
+
+    // --------------------------------------------------------------------------
     // Light pass drawing:
     // --------------------------------------------------------------------------
     auto lightPass = [this, &renderMode, &camera](RenderPass renderPass, const glm::vec3& lightPosition, const glm::vec4& lightColor,
@@ -521,15 +561,16 @@ void Scene::DrawLightSinglePointLight(const Camera& camera, const RenderMode& re
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_DEPTH_CLAMP);
     glDepthFunc(GL_LEQUAL);
-    glDepthMask(GL_TRUE);
-
+    
     // Clear the color and depth buffer
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+    glColorMask(false, false, false, false);
+    depthPass();
+
     // We primed the depth buffer, no need to write to it anymore
     // Note: for depth primed geometry, it would be the best option to also set depth function to GL_EQUAL
-    glDepthMask(GL_FALSE);
 
     // For each light we need to render the scene with its contribution
     for (int i = 0; i < _numPointLights; ++i)
@@ -551,23 +592,6 @@ void Scene::DrawLightSinglePointLight(const Camera& camera, const RenderMode& re
         glDisable(GL_STENCIL_TEST);
         lightPass(RenderPass::AmbientLight, _pointLights[i].position, _pointLights[i].color,
             glm::vec3(1.0f), glm::cos(glm::radians(180.0f)), glm::cos(glm::radians(180.0f)));
-    }
-
-    // For each spot light we need to render the scene with a shadow map
-    for (int i = 0; i < _numSpotLights; ++i)
-    {
-        //// Enable stencil test and clear the stencil buffer
-        //glClear(GL_STENCIL_BUFFER_BIT);
-        //glDisable(GL_STENCIL_TEST);
-
-        glColorMask(true, true, true, true);
-
-        lightPass(RenderPass::DirectLight, _spotLights[i].position, _spotLights[i].color,
-            _spotLights[i].direction, _spotLights[i].cutOff, _spotLights[i].outerCutOff);
-        glDisable(GL_STENCIL_TEST);
-        lightPass(RenderPass::AmbientLight, _spotLights[i].position, _spotLights[i].color,
-            _spotLights[i].direction, _spotLights[i].cutOff, _spotLights[i].outerCutOff);
-
     }
 
     // Don't forget to leave the color write enabled
@@ -769,7 +793,7 @@ void Scene::Draw(const Camera &camera, const RenderMode &renderMode, bool carmac
 
   // Render the scene into the depth buffer only, disable color write
   glColorMask(false, false, false, false);
-  //depthPass();
+  depthPass();
 
   // We primed the depth buffer, no need to write to it anymore
   // Note: for depth primed geometry, it would be the best option to also set depth function to GL_EQUAL

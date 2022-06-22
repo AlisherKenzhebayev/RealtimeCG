@@ -113,6 +113,7 @@ bool carmackReverse = true;
 GLuint fboRender = 0;
 // Our render target for rendering the final image
 GLuint renderTarget = 0;
+GLuint depthRenderMap = 0;
 
 GLuint fboCubeMapDepth = 0;
 GLuint fboDepth = 0;
@@ -474,6 +475,33 @@ void createFramebuffer(int width, int height, GLsizei MSAA)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, renderTarget, 0);
     }
+
+    // --------------------------------------------------------------------------
+    // Depth render target texture (render):
+    // --------------------------------------------------------------------------
+
+    if (glIsTexture(depthRenderMap))
+    {
+        glDeleteTextures(1, &depthRenderMap);
+        depthRenderMap = 0;
+    }
+
+    // Create texture name
+    if (depthRenderMap == 0)
+    {
+        glGenTextures(1, &depthRenderMap);
+    }
+
+    glBindTexture(GL_TEXTURE_2D, depthRenderMap);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    float borderColor[] = { 1.0, 1.0, 1.0, 1.0 };
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+    // Attach the texture to framebuffer
+    glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depthRenderMap, 0);
   
     // Set the list of draw buffers.
     GLenum drawBuffers[] = {GL_COLOR_ATTACHMENT0};
@@ -601,7 +629,7 @@ void renderScene(int pointLights, int spotLights)
         scene.DrawDepthSinglePointLight(camera, renderMode, light);
 
         // Export the texture
-        glActiveTexture(GL_TEXTURE0);
+        glActiveTexture(GL_TEXTURE5);
         glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubemap);
 
         glViewport(0, 0, width, height);
@@ -665,7 +693,7 @@ void renderScene(int pointLights, int spotLights)
     glBindFramebuffer(GL_FRAMEBUFFER, fboRender);
 
     // Draw our scene
-    scene.Draw(camera, renderMode, carmackReverse);
+    //scene.Draw(camera, renderMode, carmackReverse);
 
     glColorMask(true, true, true, true);
 
@@ -735,11 +763,11 @@ int main()
     return -1;
   }
 
-  int pointLights = 2;
-  int spotLights = 2;
+  int pointLights = 1;
+  int spotLights = 1;
 
   // Scene initialization
-  scene.Init(10, pointLights, spotLights);
+  scene.Init(3, pointLights, spotLights);
 
   // Enter the application main loop
   mainLoop(pointLights, spotLights);

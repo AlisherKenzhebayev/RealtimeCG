@@ -647,6 +647,8 @@ layout (binding = 0) uniform sampler2D Diffuse;
 layout (binding = 1) uniform sampler2D Normal;
 layout (binding = 2) uniform sampler2D Specular;
 layout (binding = 3) uniform sampler2D Occlusion;
+// depth texture binding
+layout (binding = 5) uniform samplerCube depthMap;
 
 // Note: explicit location because AMD APU drivers screw up position when linking against
 // the default vertex shader with mat4x3 modelToWorld at location 0 occupying 4 slots
@@ -668,8 +670,6 @@ layout (location = 9) uniform float outerCutoff;
 // Spotlight outer cutoff (cosines)
 layout (location = 10) uniform float far_plane;
 
-uniform samplerCube depthMap;
-
 // Fragment shader inputs
 in VertexData
 {
@@ -688,7 +688,7 @@ float ShadowCalculation(vec4 fragPos)
 {
     // get vector between fragment position and light position
     vec3 fragToLight = fragPos.xyz - lightPosWS.xyz;
-    // use the light to fragment vector to sample from the depth map    
+    // use the light to fragment vector to sample from the depth map
     float closestDepth = texture(depthMap, fragToLight).r;
     // it is currently in linear range between [0,1]. Re-transform back to original value
     closestDepth *= far_plane;
@@ -697,7 +697,7 @@ float ShadowCalculation(vec4 fragPos)
     // now test for shadows
 
     // TODO: modulate the bias
-    float bias = 0.05; 
+    float bias = 0.00; 
     float shadow = currentDepth -  bias > closestDepth ? 1.0 : 0.0;
 
     return shadow;
@@ -764,6 +764,15 @@ void main()
   float shadow = ShadowCalculation(vIn.worldPos);
   // Calculate the final color
   finalColor = (ambient + (1.0 - shadow) * (diffuse + specular)) * albedo;
+
+    // get vector between fragment position and light position
+    vec3 fragToLight = vIn.worldPos.xyz - lightPosWS.xyz;
+    // use the light to fragment vector to sample from the depth map    
+    float closestDepth = texture(depthMap, fragToLight).r;
+    // it is currently in linear range between [0,1]. Re-transform back to original value
+    closestDepth *= far_plane;
+    
+    finalColor = vec3(closestDepth / far_plane);
   color = vec4(finalColor, 1.0f);
 }
 )",
