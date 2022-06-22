@@ -333,11 +333,13 @@ void Scene::UpdateProgramData(GLuint program, RenderPass renderPass, const Camer
           glUniformMatrix4fv(glGetUniformLocation(program, name.c_str()), 1, GL_FALSE, glm::value_ptr(shadowTransforms[i]));
       }
 
+      GLuint loc = glGetUniformLocation(program, "lightPos");
+      glUniform3fv(loc, 1, glm::value_ptr(lightPosition));
+  }
+
+  if ((int)renderPass & ((int)RenderPass::DepthPass | (int)RenderPass::LightPass)) {
       GLuint loc = glGetUniformLocation(program, "far_plane");
       glUniform1f(loc, far_plane);
-
-      loc = glGetUniformLocation(program, "lightPos");
-      glUniform3fv(loc, 1, glm::value_ptr(lightPosition));
   }
 }
 
@@ -354,15 +356,6 @@ void Scene::UpdateTransformBlockSingleSpotLight(const int& light)
     glm::mat4x4 lightProjectionMatrix = glm::perspective(glm::radians(45.0f), (GLfloat)SHADOW_WIDTH / (GLfloat)SHADOW_HEIGHT, near_plane, far_plane);
     // Update the projection matrix
     glBufferSubData(GL_UNIFORM_BUFFER, sizeof(glm::mat3x4), sizeof(glm::mat4x4), static_cast<const void*>(&*glm::value_ptr(lightProjectionMatrix)));
-
-    // Unbind the GL_UNIFORM_BUFFER target for now
-    glBindBuffer(GL_UNIFORM_BUFFER, 0);
-}
-
-void Scene::UpdateTransformBlockSinglePointLight(const int& light)
-{
-    // Tell OpenGL we want to work with our transform block
-    glBindBuffer(GL_UNIFORM_BUFFER, _transformBlockUBO);
 
     // Unbind the GL_UNIFORM_BUFFER target for now
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
@@ -488,17 +481,109 @@ void Scene::DrawObjects(GLuint program, RenderPass renderPass, const Camera &cam
   }
 }
 
+// Do a light pass for a single point light, using a linked cube map
+void Scene::DrawLightSinglePointLight(const Camera& camera, const RenderMode& renderMode, int light) {
+    UpdateTransformBlock(camera);
 
-// Do a depth pass for a single spotlight, single face
+    // --------------------------------------------------------------------------
+    // Light pass drawing:
+    // --------------------------------------------------------------------------
+    auto lightPass = [this, &renderMode, &camera](RenderPass renderPass, const glm::vec3& lightPosition, const glm::vec4& lightColor,
+        const glm::vec3& lightDirection, const float& cutOff, const float& outerCutOff)
+    {
+        // Enable additive alpha blending
+        glEnable(GL_BLEND);
+        glBlendEquation(GL_FUNC_ADD);
+        glBlendFunc(GL_ONE, GL_ONE);
+
+        DrawBackground(shaderProgram[ShaderProgram::DefaultPointLightShadowMapPass], renderPass, camera, lightPosition, lightColor,
+            lightDirection, cutOff, outerCutOff);
+        DrawObjects(shaderProgram[ShaderProgram::InstancingPointLightShadowMapPass], renderPass, camera, lightPosition, lightColor,
+            lightDirection, cutOff, outerCutOff);
+
+        // Disable blending after this pass
+        glDisable(GL_BLEND);
+    };
+
+    // --------------------------------------------------------------------------
+
+    // Update the scene
+    UpdateInstanceData();
+
+    // Enable backface culling
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+
+    // Enable/disable wireframe
+    glPolygonMode(GL_FRONT_AND_BACK, renderMode.wireframe ? GL_LINE : GL_FILL);
+
+    // Enable depth test, clamp, and write
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_DEPTH_CLAMP);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_TRUE);
+
+    // Clear the color and depth buffer
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // We primed the depth buffer, no need to write to it anymore
+    // Note: for depth primed geometry, it would be the best option to also set depth function to GL_EQUAL
+    glDepthMask(GL_FALSE);
+
+    // For each light we need to render the scene with its contribution
+    for (int i = 0; i < _numPointLights; ++i)
+    {
+        // Enable stencil test and clear the stencil buffer
+        //glClear(GL_STENCIL_BUFFER_BIT);
+        //glEnable(GL_STENCIL_TEST);
+
+        //// Draw shadow volumes first, disable color write
+        //glColorMask(false, false, false, false);
+        //shadowVolumePass(_pointLights[i].position, _pointLights[i].color);
+
+        glColorMask(true, true, true, true);
+     
+        // Angle for pointlights is explained by the fact that pointlights can be simulated by a 180 degree half-angle spotlight
+        lightPass(RenderPass::DirectLight, _pointLights[i].position, _pointLights[i].color,
+            glm::vec3(1.0f), glm::cos(glm::radians(180.0f)), glm::cos(glm::radians(180.0f)));
+
+        glDisable(GL_STENCIL_TEST);
+        lightPass(RenderPass::AmbientLight, _pointLights[i].position, _pointLights[i].color,
+            glm::vec3(1.0f), glm::cos(glm::radians(180.0f)), glm::cos(glm::radians(180.0f)));
+    }
+
+    // For each spot light we need to render the scene with a shadow map
+    for (int i = 0; i < _numSpotLights; ++i)
+    {
+        //// Enable stencil test and clear the stencil buffer
+        //glClear(GL_STENCIL_BUFFER_BIT);
+        //glDisable(GL_STENCIL_TEST);
+
+        glColorMask(true, true, true, true);
+
+        lightPass(RenderPass::DirectLight, _spotLights[i].position, _spotLights[i].color,
+            _spotLights[i].direction, _spotLights[i].cutOff, _spotLights[i].outerCutOff);
+        glDisable(GL_STENCIL_TEST);
+        lightPass(RenderPass::AmbientLight, _spotLights[i].position, _spotLights[i].color,
+            _spotLights[i].direction, _spotLights[i].cutOff, _spotLights[i].outerCutOff);
+
+    }
+
+    // Don't forget to leave the color write enabled
+    glColorMask(true, true, true, true);
+ }
+
+// Do a depth pass for a single point light, to cube map
 void Scene::DrawDepthSinglePointLight(const Camera& camera, const RenderMode& renderMode, int light) {
-    UpdateTransformBlockSinglePointLight(light);
+    UpdateTransformBlock(camera);
 
-    auto depthPass = [this, &renderMode, &camera]()
+    auto depthPass = [this, &renderMode, &camera](const glm::vec3& lightPosition)
     {
         // No need to pass real light position and color as we don't need them in the depth pass
-        DrawBackground(shaderProgram[ShaderProgram::DefaultPointLightDepthPass], RenderPass::DepthPass, camera, glm::vec3(0.0f), glm::vec4(0.0f),
+        DrawBackground(shaderProgram[ShaderProgram::DefaultPointLightDepthPass], RenderPass::DepthPass, camera, lightPosition, glm::vec4(0.0f),
             glm::vec3(0.0f), 0.0f, 0.0f);
-        DrawObjects(shaderProgram[ShaderProgram::InstancingPointLightDepthPass], RenderPass::DepthPass, camera, glm::vec3(0.0f), glm::vec4(0.0f),
+        DrawObjects(shaderProgram[ShaderProgram::InstancingPointLightDepthPass], RenderPass::DepthPass, camera, lightPosition, glm::vec4(0.0f),
             glm::vec3(0.0f), 0.0f, 0.0f);
     };
 
@@ -531,19 +616,19 @@ void Scene::DrawDepthSinglePointLight(const Camera& camera, const RenderMode& re
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
     // Render the scene into the depth buffer
-    //glColorMask(false, false, false, false);
-    depthPass();
+    glColorMask(false, false, false, false);
+    depthPass(_pointLights[light].position);
 }
 
 // Do a depth pass for a single spotlight
 void Scene::DrawDepthSingleSpotLight(const Camera& camera, const RenderMode& renderMode, int light) {
     UpdateTransformBlockSingleSpotLight(light);
     
-    auto depthPass = [this, &renderMode, &camera](const glm::vec3& lightPosition)
+    auto depthPass = [this, &renderMode, &camera]()
     {
-        DrawBackground(shaderProgram[ShaderProgram::DefaultDepthPass], RenderPass::DepthPass, camera, lightPosition, glm::vec4(0.0f),
+        DrawBackground(shaderProgram[ShaderProgram::DefaultDepthPass], RenderPass::DepthPass, camera, glm::vec3(0.0f), glm::vec4(0.0f),
             glm::vec3(0.0f), 0.0f, 0.0f);
-        DrawObjects(shaderProgram[ShaderProgram::InstancingDepthPass], RenderPass::DepthPass, camera, lightPosition, glm::vec4(0.0f),
+        DrawObjects(shaderProgram[ShaderProgram::InstancingDepthPass], RenderPass::DepthPass, camera, glm::vec3(0.0f), glm::vec4(0.0f),
             glm::vec3(0.0f), 0.0f, 0.0f);
     };
 
@@ -576,8 +661,8 @@ void Scene::DrawDepthSingleSpotLight(const Camera& camera, const RenderMode& ren
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
     // Render the scene into the depth buffer
-    //glColorMask(false, false, false, false);
-    depthPass(_pointLights[light].position);
+    glColorMask(false, false, false, false);
+    depthPass();
 }
 
 void Scene::Draw(const Camera &camera, const RenderMode &renderMode, bool carmackReverse)
@@ -657,7 +742,6 @@ void Scene::Draw(const Camera &camera, const RenderMode &renderMode, bool carmac
 
   // --------------------------------------------------------------------------
 
-  // Update the scene
   UpdateInstanceData();
 
   // Enable/disable MSAA rendering
@@ -685,7 +769,7 @@ void Scene::Draw(const Camera &camera, const RenderMode &renderMode, bool carmac
 
   // Render the scene into the depth buffer only, disable color write
   glColorMask(false, false, false, false);
-  depthPass();
+  //depthPass();
 
   // We primed the depth buffer, no need to write to it anymore
   // Note: for depth primed geometry, it would be the best option to also set depth function to GL_EQUAL
@@ -694,28 +778,22 @@ void Scene::Draw(const Camera &camera, const RenderMode &renderMode, bool carmac
   // For each light we need to render the scene with its contribution
   for (int i = 0; i < _numPointLights; ++i)
   {
-    // Angle for pointlights is explained by the fact that pointlights can be simulated by a 180 degree half-angle spotlight
-
-    // Enable stencil test and clear the stencil buffer
     glClear(GL_STENCIL_BUFFER_BIT);
     glEnable(GL_STENCIL_TEST);
 
-    //// Draw shadow volumes first, disable color write
-    //glColorMask(false, false, false, false);
-    //shadowVolumePass(_pointLights[i].position, _pointLights[i].color);
+    // Draw shadow volumes first, disable color write
+    glColorMask(false, false, false, false);
+    shadowVolumePass(_pointLights[i].position, _pointLights[i].color);
 
-    // Draw direct light utilizing stenciled shadows, enable color write
     glColorMask(true, true, true, true);
     lightPass(RenderPass::DirectLight, _pointLights[i].position, _pointLights[i].color, 
         glm::vec3(1.0f), glm::cos(glm::radians(180.0f)), glm::cos(glm::radians(180.0f)));
 
-    // Disable stencil test as we don't want shadows to affect ambient light
     glDisable(GL_STENCIL_TEST);
     lightPass(RenderPass::AmbientLight, _pointLights[i].position, _pointLights[i].color,
         glm::vec3(1.0f), glm::cos(glm::radians(180.0f)), glm::cos(glm::radians(180.0f)));
   }
 
-  // For each spot light we need to render the scene with a shadow map
   for (int i = 0; i < _numSpotLights; ++i)
   {
       // Enable stencil test and clear the stencil buffer

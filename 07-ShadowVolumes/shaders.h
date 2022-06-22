@@ -12,7 +12,7 @@ namespace ShaderProgram
 {
   enum
   {
-    Default, DefaultDepthPass, Instancing, InstancingDepthPass, InstancedShadowVolume, PointRendering, Tonemapping, DefaultPointLightDepthPass, InstancingPointLightDepthPass, NumShaderPrograms
+    Default, DefaultDepthPass, Instancing, InstancingDepthPass, InstancedShadowVolume, PointRendering, Tonemapping, DefaultPointLightDepthPass, InstancingPointLightDepthPass, DefaultPointLightShadowMapPass, InstancingPointLightShadowMapPass, NumShaderPrograms
   };
 }
 
@@ -389,7 +389,7 @@ namespace FragmentShader
 {
   enum
   {
-    Default, SingleColor, Null, Tonemapping, Depth, PointLightDepthPass, NumFragmentShaders
+    Default, SingleColor, Null, Tonemapping, Depth, PointLightDepthPass, PointLightShadowMapPass, NumFragmentShaders
   };
 }
 
@@ -606,7 +606,7 @@ void main()
 }
 )",
 // ----------------------------------------------------------------------------
-// Point light FS shader
+// Point light FS shader for depth
 // ----------------------------------------------------------------------------
 R"(
 #version 330 core
@@ -629,6 +629,143 @@ void main()
     gl_FragDepth = lightDistance;
     color = vec4(lightDistance, lightDistance, lightDistance, 1.0);
 }  
+)",
+// ----------------------------------------------------------------------------
+// Point light FS shader for shadow maps (works with a cubemap texture, otherwise a copy of modified Default shader above)
+// ----------------------------------------------------------------------------
+R"(
+#version 330 core
+
+// The following is not not needed since GLSL version #430
+#extension GL_ARB_explicit_uniform_location : require
+
+// The following is not not needed since GLSL version #420
+#extension GL_ARB_shading_language_420pack : require
+
+// Texture sampler
+layout (binding = 0) uniform sampler2D Diffuse;
+layout (binding = 1) uniform sampler2D Normal;
+layout (binding = 2) uniform sampler2D Specular;
+layout (binding = 3) uniform sampler2D Occlusion;
+
+// Note: explicit location because AMD APU drivers screw up position when linking against
+// the default vertex shader with mat4x3 modelToWorld at location 0 occupying 4 slots
+
+// Light position/direction
+layout (location = 4) uniform vec4 lightPosWS;
+// View position in world space coordinates
+layout (location = 5) uniform vec4 viewPosWS;
+// Light color
+layout (location = 6) uniform vec4 lightColor;
+
+// Light direction
+layout (location = 7) uniform vec3 lightDirection;
+// Spotlight cutoff (cosines)
+layout (location = 8) uniform float cutoff;
+// Spotlight outer cutoff (cosines)
+layout (location = 9) uniform float outerCutoff;
+
+// Spotlight outer cutoff (cosines)
+layout (location = 10) uniform float far_plane;
+
+uniform samplerCube depthMap;
+
+// Fragment shader inputs
+in VertexData
+{
+  vec2 texCoord;
+  vec3 tangent;
+  vec3 bitangent;
+  vec3 normal;
+  vec4 worldPos;
+} vIn;
+
+// Fragment shader outputs
+layout (location = 0) out vec4 color;
+
+// Shadow calculation (learnOpenGl)
+float ShadowCalculation(vec4 fragPos)
+{
+    // get vector between fragment position and light position
+    vec3 fragToLight = fragPos.xyz - lightPosWS.xyz;
+    // use the light to fragment vector to sample from the depth map    
+    float closestDepth = texture(depthMap, fragToLight).r;
+    // it is currently in linear range between [0,1]. Re-transform back to original value
+    closestDepth *= far_plane;
+    // now get current linear depth as the length between the fragment and light position
+    float currentDepth = length(fragToLight);
+    // now test for shadows
+
+    // TODO: modulate the bias
+    float bias = 0.05; 
+    float shadow = currentDepth -  bias > closestDepth ? 1.0 : 0.0;
+
+    return shadow;
+}  
+
+void main()
+{
+  // Shortcut variables for ambient/diffuse light component intensity modulation
+  const float ambientIntensity = lightColor.a;
+  const float directIntensity = lightPosWS.w;
+
+  // Sample textures
+  vec3 albedo = texture(Diffuse, vIn.texCoord.st).rgb;
+  vec3 noSample = texture(Normal, vIn.texCoord.st).rgb;
+  float specSample = texture(Specular, vIn.texCoord.st).r;
+  float occlusion = texture(Occlusion, vIn.texCoord.st).r;
+
+  // Calculate world-space normal
+  mat3 STN = {vIn.tangent, vIn.bitangent, vIn.normal};
+  vec3 normal = STN * (noSample * 2.0f - 1.0f);
+
+  // Calculate the lighting direction and distance
+  vec3 lightDir = lightPosWS.xyz - vIn.worldPos.xyz;
+  float lengthSq = dot(lightDir, lightDir);
+  float length = sqrt(lengthSq);
+  lightDir /= length;
+
+  // Calculate the angle between the -spotlight direction and lightDir
+  float theta = dot(normalize(lightDir), normalize(-lightDirection));
+  float epsilon   = cutoff - outerCutoff;
+  float intensity = clamp((theta - outerCutoff) / epsilon, 0.0, 1.0);    
+
+  // Calculate the view and reflection/halfway direction
+  vec3 viewDir = normalize(viewPosWS.xyz - vIn.worldPos.xyz);
+  // Cheaper approximation of reflected direction = reflect(-lightDir, normal)
+  vec3 halfDir = normalize(viewDir + lightDir);
+
+  // Calculate diffuse and specular coefficients
+  float NdotL = max(0.0f, dot(normal, lightDir));
+  float NdotH = max(0.0f, dot(normal, halfDir));
+
+  // Calculate horizon fading factor
+  float horizon = clamp(1.0f + dot(vIn.normal, lightDir), 0.0f, 1.0f);
+  horizon *= horizon;
+  horizon *= horizon;
+  horizon *= horizon;
+  horizon *= horizon;
+
+  // Calculate the Phong model terms: ambient, diffuse, specular
+  vec3 ambient = ambientIntensity * occlusion * lightColor.rgb;
+  vec3 diffuse = directIntensity * horizon * NdotL * lightColor.rgb;
+  vec3 specular = directIntensity* horizon * specSample * lightColor.rgb * pow(NdotH, 32.0f);   // Defines shininess
+  
+  // Spotlight, Soft edges
+  diffuse = diffuse * intensity;   
+  specular = specular * intensity;   
+
+  // Light attenuation with squared distance
+  diffuse = diffuse / lengthSq;
+  specular = specular / lengthSq;
+
+  vec3 finalColor;
+                                                   
+  float shadow = ShadowCalculation(vIn.worldPos);
+  // Calculate the final color
+  finalColor = (ambient + (1.0 - shadow) * (diffuse + specular)) * albedo;
+  color = vec4(finalColor, 1.0f);
+}
 )",
 ""};
 

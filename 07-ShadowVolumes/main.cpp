@@ -95,8 +95,8 @@ static constexpr float CameraTurboSpeed = 50.0f;
 
 // Max buffer length
 static const unsigned int MAX_TEXT_LENGTH = 256;
-// MSAA samples
-static const GLsizei MSAA_SAMPLES = 4;
+// MSAA samples (turned off, as was causing a lot of headache)
+static const GLsizei MSAA_SAMPLES = 1;
 
 // Camera instance
 Camera camera;
@@ -173,15 +173,8 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
   // Enable/disable MSAA - note that it still uses the MSAA buffer
   if (key == GLFW_KEY_F1 && action == GLFW_PRESS)
   {
-    if (renderMode.msaaLevel > 1)
-    {
-      renderMode.msaaLevel = 1;
-    }
-    else
-    {
-      renderMode.msaaLevel = MSAA_SAMPLES;
-    }
-
+    renderMode.msaaLevel = 1;
+   
     createFramebuffer(mainWindow.width, mainWindow.height, renderMode.msaaLevel);
   }
 
@@ -348,7 +341,7 @@ void createDepthFramebuffer(int width, int height)
     }
 
     glBindTexture(GL_TEXTURE_2D, depthMap);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_SIZE, SHADOW_SIZE, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
@@ -387,25 +380,6 @@ void createCubeMapDepthFramebuffer(int width, int height)
     // Bind it and recreate textures
     glBindFramebuffer(GL_FRAMEBUFFER, fboCubeMapDepth);
 
-    //// Delete it if necessary
-    //if (glIsTexture(depthRenderTarget))
-    //{
-    //    glDeleteTextures(1, &depthRenderTarget);
-    //    depthRenderTarget = 0;
-    //}
-
-    //// Create the texture name
-    //if (depthRenderTarget == 0)
-    //{
-    //    glGenTextures(1, &depthRenderTarget);
-    //}
-
-    //glBindTexture(GL_TEXTURE_2D, depthRenderTarget);
-    //glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, width, height, 0, GL_RGB, GL_FLOAT, nullptr);
-    //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    //glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, depthRenderTarget, 0);
-
     // --------------------------------------------------------------------------
     // Depth cubemap
     // --------------------------------------------------------------------------
@@ -438,10 +412,6 @@ void createCubeMapDepthFramebuffer(int width, int height)
         // attach depth texture as FBO's depth buffer
         glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depthCubemap, 0);
     }
-
-    //// Set the list of draw buffers.
-    //GLenum drawBuffers[] = { GL_COLOR_ATTACHMENT0 };
-    //glDrawBuffers(1, drawBuffers);
     
     glDrawBuffer(GL_NONE);
     glReadBuffer(GL_NONE);
@@ -602,17 +572,25 @@ void processInput(float dt)
 
 void renderScene(int pointLights, int spotLights)
 {
+    // Clean the framebuffer
+    glBindFramebuffer(GL_FRAMEBUFFER, fboRender);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
     // Save the screen size
     int width, height;
     glfwGetFramebufferSize(mainWindow.handle, &width, &height);
     
     // Change viewport to depth map size for shadowmaps
-    resizeCallback(mainWindow.handle, SHADOW_SIZE, SHADOW_SIZE);
+    //resizeCallback(mainWindow.handle, SHADOW_SIZE, SHADOW_SIZE);
 
     createCubeMapDepthFramebuffer(SHADOW_SIZE, SHADOW_SIZE);
     // The shadowmap pass for point lights
     for (int light = 0; light < pointLights; light++)
     {
+        glViewport(0, 0, SHADOW_SIZE, SHADOW_SIZE);
+        
         // Bind the framebuffer of cubemaps
         glBindFramebuffer(GL_FRAMEBUFFER, fboCubeMapDepth);
         glClear(GL_DEPTH_BUFFER_BIT);
@@ -626,9 +604,14 @@ void renderScene(int pointLights, int spotLights)
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubemap);
 
+        glViewport(0, 0, width, height);
+        glBindFramebuffer(GL_FRAMEBUFFER, fboRender);
+        glClear(GL_DEPTH_BUFFER_BIT);
+
         // Additively draw the light using the depth texture
         // Create a separate light pass for spotlights 
-
+        scene.DrawLightSinglePointLight(camera, renderMode, light);
+            
         glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
 
         // Bind back the default framebuffer
@@ -639,6 +622,8 @@ void renderScene(int pointLights, int spotLights)
     // The shadowmap pass for spotlights
     for (int light = 0; light < spotLights; light++)
     {
+        glViewport(0, 0, SHADOW_SIZE, SHADOW_SIZE);
+
         // Deal with the shadow maps
         // Bind the framebuffer and render the light source to depth map
         glBindFramebuffer(GL_FRAMEBUFFER, fboDepth);
@@ -655,7 +640,15 @@ void renderScene(int pointLights, int spotLights)
         glBindTexture(GL_TEXTURE_2D, depthMap);
 
         // Additively draw the light using the depth texture
-        // It is a separate light pass for spotlights 
+        // It is a separate light pass for spotlight
+
+        glViewport(0, 0, width, height);
+        glBindFramebuffer(GL_FRAMEBUFFER, fboRender);
+        glClear(GL_DEPTH_BUFFER_BIT);
+
+        // Additively draw the light using the depth texture
+        // Create a separate light pass for spotlights 
+        //scene.DrawLightSinglePointLight(camera, renderMode, light);
 
         glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -663,57 +656,23 @@ void renderScene(int pointLights, int spotLights)
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
 
-    resizeCallback(mainWindow.handle, width, height);
+    //resizeCallback(mainWindow.handle, width, height);
     
     // Change viewport back
-    //glViewport(0, 0, mainWindow.width, mainWindow.height);
+    glViewport(0, 0, width, height);
+    
     // Bind the framebuffer
     glBindFramebuffer(GL_FRAMEBUFFER, fboRender);
 
     // Draw our scene
     scene.Draw(camera, renderMode, carmackReverse);
 
+    glColorMask(true, true, true, true);
+
     // Unbind the shader program and other resources
     glBindVertexArray(0);
     glUseProgram(0);
 
-    if (renderMode.tonemapping)
-    {
-        // Unbind the framebuffer and bind the window system provided FBO
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-        // Solid fill always
-        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-
-        // Disable multisampling and depth test
-        glDisable(GL_MULTISAMPLE);
-        glDisable(GL_DEPTH_TEST);
-
-        // Clear the color
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        // Tonemapping
-        glUseProgram(shaderProgram[ShaderProgram::Tonemapping]);
-
-        // Send in the required data
-        glUniform1f(0, (float)renderMode.msaaLevel);
-
-        // Bind the HDR render target as texture
-        GLenum target = (renderMode.msaaLevel > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(target, renderTarget);
-        glBindSampler(0, 0); // Very important!
-
-        // Draw fullscreen quad
-        glBindVertexArray(scene.GetGenericVAO());
-        glDrawArrays(GL_TRIANGLES, 0, 6);
-
-        // Unbind the shader program and other resources
-        glBindVertexArray(0);
-        glUseProgram(0);
-    }
-    else
     {
         // Just copy the render target to the screen
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
