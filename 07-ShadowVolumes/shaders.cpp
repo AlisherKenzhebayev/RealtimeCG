@@ -116,15 +116,29 @@ bool compileShaders()
   uniformBlockBinding(shaderProgram[ShaderProgram::DefaultDepthPass]);
 
   // Shader program for non-instanced geometry w/o color
-  shaderProgram[ShaderProgram::LightSourceDepthPass] = glCreateProgram();
-  glAttachShader(shaderProgram[ShaderProgram::LightSourceDepthPass], vertexShader[VertexShader::LightSourceDepth]);
-  glAttachShader(shaderProgram[ShaderProgram::LightSourceDepthPass], fragmentShader[FragmentShader::Null]);
-  if (!ShaderCompiler::LinkProgram(shaderProgram[ShaderProgram::LightSourceDepthPass]))
+  shaderProgram[ShaderProgram::InstancingPointLightDepthPass] = glCreateProgram();
+  glAttachShader(shaderProgram[ShaderProgram::InstancingPointLightDepthPass], vertexShader[VertexShader::InstancingPointLightDepthPass]);
+  glAttachShader(shaderProgram[ShaderProgram::InstancingPointLightDepthPass], geometryShader[GeometryShader::PointLightDepthPass]);
+  glAttachShader(shaderProgram[ShaderProgram::InstancingPointLightDepthPass], fragmentShader[FragmentShader::PointLightDepthPass]);
+  if (!ShaderCompiler::LinkProgram(shaderProgram[ShaderProgram::InstancingPointLightDepthPass]))
   {
       cleanUp();
       return false;
   }
-  uniformBlockBinding(shaderProgram[ShaderProgram::LightSourceDepthPass]);
+  uniformBlockBinding(shaderProgram[ShaderProgram::InstancingPointLightDepthPass]);
+
+
+  // Shader program for non-instanced geometry w/o color
+  shaderProgram[ShaderProgram::DefaultPointLightDepthPass] = glCreateProgram();
+  glAttachShader(shaderProgram[ShaderProgram::DefaultPointLightDepthPass], vertexShader[VertexShader::DefaultPointLightDepthPass]);
+  glAttachShader(shaderProgram[ShaderProgram::DefaultPointLightDepthPass], geometryShader[GeometryShader::PointLightDepthPass]);
+  glAttachShader(shaderProgram[ShaderProgram::DefaultPointLightDepthPass], fragmentShader[FragmentShader::PointLightDepthPass]);
+  if (!ShaderCompiler::LinkProgram(shaderProgram[ShaderProgram::DefaultPointLightDepthPass]))
+  {
+      cleanUp();
+      return false;
+  }
+  uniformBlockBinding(shaderProgram[ShaderProgram::DefaultPointLightDepthPass]);
 
   // Shader program for instanced geometry w/ color
   shaderProgram[ShaderProgram::Instancing] = glCreateProgram();

@@ -12,7 +12,7 @@ namespace ShaderProgram
 {
   enum
   {
-    Default, DefaultDepthPass, Instancing, InstancingDepthPass, InstancedShadowVolume, PointRendering, Tonemapping, LightSourceDepthPass, NumShaderPrograms
+    Default, DefaultDepthPass, Instancing, InstancingDepthPass, InstancedShadowVolume, PointRendering, Tonemapping, DefaultPointLightDepthPass, InstancingPointLightDepthPass, NumShaderPrograms
   };
 }
 
@@ -29,7 +29,7 @@ namespace VertexShader
 {
   enum
   {
-    Default, Instancing, InstancedShadowVolume, Point, ScreenQuad, LightSourceDepth, NumVertexShaders
+    Default, Instancing, InstancedShadowVolume, Point, ScreenQuad, DefaultPointLightDepthPass, InstancingPointLightDepthPass, NumVertexShaders
   };
 }
 
@@ -266,7 +266,7 @@ void main()
 }
 )",
 // ----------------------------------------------------------------------------
-// Light source depth vertex shader
+// Default vertex shader for point light depth (only world space)
 // ----------------------------------------------------------------------------
 R"(
 #version 330 core
@@ -277,18 +277,109 @@ R"(
 // The following is not not needed since GLSL version #420
 #extension GL_ARB_shading_language_420pack : require
 
-layout (location = 0) in vec3 position;
+// Model to world transformation separately, takes 4 slots!
+layout (location = 0) uniform mat4x3 modelToWorld;
 
-// Uniform blocks, i.e. constants
-layout (location = 0) uniform mat4 model;
-layout (location = 1) uniform mat4 lightView;
-layout (location = 2) uniform mat4 lightProjection;
+// Vertex attribute block, i.e., input
+layout (location = 0) in vec3 position;
+layout (location = 1) in vec3 normal;
+layout (location = 2) in vec3 tangent;
+layout (location = 3) in vec2 texCoord;
+
+// Vertex output
+out VertexData
+{
+  vec2 texCoord;
+  vec3 tangent;
+  vec3 bitangent;
+  vec3 normal;
+  vec4 worldPos;
+} vOut;
 
 void main()
 {
-    gl_Position = lightProjection * lightView * model * vec4(position, 1.0);
+  // Pass texture coordinates to the fragment shader
+  vOut.texCoord = texCoord.st;
+
+  // Construct the normal transformation matrix
+  mat3 normalTransform = transpose(inverse(mat3(modelToWorld)));
+
+  // Create the tangent space matrix and pass it to the fragment shader
+  vOut.normal = normalize(normalTransform * normal);
+  vOut.tangent = normalize(mat3(modelToWorld) * tangent);
+  vOut.bitangent = cross(vOut.tangent, vOut.normal);
+
+  // Transform vertex position
+  vOut.worldPos = vec4(modelToWorld * vec4(position.xyz, 1.0f), 1.0f);
+
+  gl_Position = vOut.worldPos;
 }
-)"
+)",
+// ----------------------------------------------------------------------------
+// Instancing vertex shader for point light depth (only world space)
+// ----------------------------------------------------------------------------
+R"(
+#version 330 core
+
+// The following is not not needed since GLSL version #430
+#extension GL_ARB_explicit_uniform_location : require
+
+// The following is not not needed since GLSL version #420
+#extension GL_ARB_shading_language_420pack : require
+
+// Vertex attribute block, i.e., input
+layout (location = 0) in vec3 position;
+layout (location = 1) in vec3 normal;
+layout (location = 2) in vec3 tangent;
+layout (location = 3) in vec2 texCoord;
+
+// Must match the structure on the CPU side
+struct InstanceData
+{
+  mat3x4 modelToWorld;
+};
+
+// Uniform buffer used for instances
+layout (std140, binding = 1) uniform InstanceBuffer
+{
+  // We are limited to 4096 vec4 registers in total, hence the maximum number of instances
+  // being 1024 meaning we could fit another vec4 worth of data
+  InstanceData instanceBuffer[1024];
+};
+
+// Vertex output
+out VertexData
+{
+  vec2 texCoord;
+  vec3 tangent;
+  vec3 bitangent;
+  vec3 normal;
+  vec4 worldPos;
+} vOut;
+
+void main()
+{
+  // Pass texture coordinates to the fragment shader
+  vOut.texCoord = texCoord.st;
+
+  // Retrieve the model to world matrix from the instance buffer
+  mat3x4 modelToWorld = instanceBuffer[gl_InstanceID].modelToWorld;
+
+  // Construct the normal transformation matrix
+  mat3 normalTransform = transpose(inverse(mat3(modelToWorld)));
+
+  // Create the tangent space matrix and pass it to the fragment shader
+  // Note: we must multiply from the left because of transposed modelToWorld
+  vOut.normal = normalize(normal * normalTransform);
+  vOut.tangent = normalize(tangent * mat3(modelToWorld));
+  vOut.bitangent = cross(vOut.tangent, vOut.normal);
+
+  // Transform vertex position, note we multiply from the left because of transposed modelToWorld
+  vOut.worldPos = vec4(vec4(position.xyz, 1.0f) * modelToWorld, 1.0f);
+
+  gl_Position = vOut.worldPos;
+}
+)",
 ""};
 
 // ============================================================================
@@ -298,7 +389,7 @@ namespace FragmentShader
 {
   enum
   {
-    Default, SingleColor, Null, Tonemapping, Depth, NumFragmentShaders
+    Default, SingleColor, Null, Tonemapping, Depth, PointLightDepthPass, NumFragmentShaders
   };
 }
 
@@ -514,6 +605,31 @@ void main()
     color = vec4(vec3(depth), 1.0);
 }
 )",
+// ----------------------------------------------------------------------------
+// Point light FS shader
+// ----------------------------------------------------------------------------
+R"(
+#version 330 core
+in vec4 FragPos;
+
+uniform vec3 lightPos;
+uniform float far_plane;
+
+out vec4 color;
+
+void main()
+{
+    // get distance between fragment and light source
+    float lightDistance = length(FragPos.xyz - lightPos);
+    
+    // map to [0;1] range by dividing by far_plane
+    lightDistance = lightDistance / far_plane;
+    
+    // write this as modified depth
+    gl_FragDepth = lightDistance;
+    color = vec4(lightDistance, lightDistance, lightDistance, 1.0);
+}  
+)",
 ""};
 
 // ============================================================================
@@ -523,7 +639,7 @@ namespace GeometryShader
 {
 enum
 {
-  ShadowVolume, NumGeometryShaders
+  ShadowVolume, PointLightDepthPass, NumGeometryShaders
 };
 }
 
@@ -676,6 +792,30 @@ void main()
      // EndPrimitive() here is implicit
   }
 }
+)",
+R"(
+#version 330 core
+layout (triangles) in;
+layout (triangle_strip, max_vertices=18) out;
+
+uniform mat4 shadowMatrices[6];
+
+out vec4 FragPos; // FragPos from GS (output per emitvertex)
+
+void main()
+{
+    for(int face = 0; face < 6; ++face)
+    {
+        gl_Layer = face; // built-in variable that specifies to which face we render.
+        for(int i = 0; i < 3; ++i) // for each triangle vertex
+        {
+            FragPos = gl_in[i].gl_Position;
+            gl_Position = shadowMatrices[face] * FragPos;
+            EmitVertex();
+        }    
+        EndPrimitive();
+    }
+} 
 )",
 ""
 };

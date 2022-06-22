@@ -12,11 +12,15 @@
 #include <glm/gtx/transform.hpp>
 
 #include <MathSupport.h>
+#include <string>
 
 // Scaling factor for lights movement curve
 static const glm::vec3 scale = glm::vec3(13.0f, 2.0f, 13.0f);
 // Offset for lights movement curve
 static const glm::vec3 offset = glm::vec3(0.0f, 3.0f, 0.0f);
+float near_plane = 0.1f;
+float far_plane = 25.0f;
+const unsigned int SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
 
 // Lissajous curve position calculation based on the parameters
 auto lissajous = [](const glm::vec4 &p, float t) -> glm::vec3
@@ -313,9 +317,31 @@ void Scene::UpdateProgramData(GLuint program, RenderPass renderPass, const Camer
     GLint outerCutoffLoc = glGetUniformLocation(program, "outerCutoff");
     glUniform1f(outerCutoffLoc, outerCutoff);
   }
+
+  if ((int)renderPass & (int)RenderPass::DepthPass) {
+      glm::mat4 shadowProj = glm::perspective(glm::radians(90.0f), (float)SHADOW_WIDTH / (float)SHADOW_HEIGHT, near_plane, far_plane);
+      std::vector<glm::mat4> shadowTransforms;
+      shadowTransforms.push_back(shadowProj * glm::lookAt(lightPosition, lightPosition + glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f)));
+      shadowTransforms.push_back(shadowProj * glm::lookAt(lightPosition, lightPosition + glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f)));
+      shadowTransforms.push_back(shadowProj * glm::lookAt(lightPosition, lightPosition + glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)));
+      shadowTransforms.push_back(shadowProj * glm::lookAt(lightPosition, lightPosition + glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f)));
+      shadowTransforms.push_back(shadowProj * glm::lookAt(lightPosition, lightPosition + glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, -1.0f, 0.0f)));
+      shadowTransforms.push_back(shadowProj * glm::lookAt(lightPosition, lightPosition + glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, -1.0f, 0.0f)));
+      
+      for (unsigned int i = 0; i < 6; ++i) {
+          const std::string &name = "shadowMatrices[" + std::to_string(i) + "]";
+          glUniformMatrix4fv(glGetUniformLocation(program, name.c_str()), 1, GL_FALSE, glm::value_ptr(shadowTransforms[i]));
+      }
+
+      GLuint loc = glGetUniformLocation(program, "far_plane");
+      glUniform1f(loc, far_plane);
+
+      loc = glGetUniformLocation(program, "lightPos");
+      glUniform3fv(loc, 1, glm::value_ptr(lightPosition));
+  }
 }
 
-void Scene::UpdateTransformBlockSingleSpotLight(const float& light)
+void Scene::UpdateTransformBlockSingleSpotLight(const int& light)
 {
     // Tell OpenGL we want to work with our transform block
     glBindBuffer(GL_UNIFORM_BUFFER, _transformBlockUBO);
@@ -325,12 +351,18 @@ void Scene::UpdateTransformBlockSingleSpotLight(const float& light)
     glm::mat3x4 worldToView = glm::transpose(lightViewMatrix);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat3x4), static_cast<const void*>(&*glm::value_ptr(worldToView)));
 
-    float near_plane = 0.1f;
-    float far_plane = 1000.0f;
-    const unsigned int SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
     glm::mat4x4 lightProjectionMatrix = glm::perspective(glm::radians(45.0f), (GLfloat)SHADOW_WIDTH / (GLfloat)SHADOW_HEIGHT, near_plane, far_plane);
     // Update the projection matrix
     glBufferSubData(GL_UNIFORM_BUFFER, sizeof(glm::mat3x4), sizeof(glm::mat4x4), static_cast<const void*>(&*glm::value_ptr(lightProjectionMatrix)));
+
+    // Unbind the GL_UNIFORM_BUFFER target for now
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+}
+
+void Scene::UpdateTransformBlockSinglePointLight(const int& light)
+{
+    // Tell OpenGL we want to work with our transform block
+    glBindBuffer(GL_UNIFORM_BUFFER, _transformBlockUBO);
 
     // Unbind the GL_UNIFORM_BUFFER target for now
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
@@ -456,16 +488,17 @@ void Scene::DrawObjects(GLuint program, RenderPass renderPass, const Camera &cam
   }
 }
 
-// Do a depth pass for a single spotlight
-void Scene::DrawDepthSingleSpotLight(const Camera& camera, const RenderMode& renderMode, int light) {
-    UpdateTransformBlockSingleSpotLight(light);
-    
+
+// Do a depth pass for a single spotlight, single face
+void Scene::DrawDepthSinglePointLight(const Camera& camera, const RenderMode& renderMode, int light) {
+    UpdateTransformBlockSinglePointLight(light);
+
     auto depthPass = [this, &renderMode, &camera]()
     {
         // No need to pass real light position and color as we don't need them in the depth pass
-        DrawBackground(shaderProgram[ShaderProgram::DefaultDepthPass], RenderPass::DepthPass, camera, glm::vec3(0.0f), glm::vec4(0.0f),
+        DrawBackground(shaderProgram[ShaderProgram::DefaultPointLightDepthPass], RenderPass::DepthPass, camera, glm::vec3(0.0f), glm::vec4(0.0f),
             glm::vec3(0.0f), 0.0f, 0.0f);
-        DrawObjects(shaderProgram[ShaderProgram::InstancingDepthPass], RenderPass::DepthPass, camera, glm::vec3(0.0f), glm::vec4(0.0f),
+        DrawObjects(shaderProgram[ShaderProgram::InstancingPointLightDepthPass], RenderPass::DepthPass, camera, glm::vec3(0.0f), glm::vec4(0.0f),
             glm::vec3(0.0f), 0.0f, 0.0f);
     };
 
@@ -498,8 +531,53 @@ void Scene::DrawDepthSingleSpotLight(const Camera& camera, const RenderMode& ren
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
     // Render the scene into the depth buffer
-    //TODO: glColorMask(false, false, false, false);
+    //glColorMask(false, false, false, false);
     depthPass();
+}
+
+// Do a depth pass for a single spotlight
+void Scene::DrawDepthSingleSpotLight(const Camera& camera, const RenderMode& renderMode, int light) {
+    UpdateTransformBlockSingleSpotLight(light);
+    
+    auto depthPass = [this, &renderMode, &camera](const glm::vec3& lightPosition)
+    {
+        DrawBackground(shaderProgram[ShaderProgram::DefaultDepthPass], RenderPass::DepthPass, camera, lightPosition, glm::vec4(0.0f),
+            glm::vec3(0.0f), 0.0f, 0.0f);
+        DrawObjects(shaderProgram[ShaderProgram::InstancingDepthPass], RenderPass::DepthPass, camera, lightPosition, glm::vec4(0.0f),
+            glm::vec3(0.0f), 0.0f, 0.0f);
+    };
+
+    // --------------------------------------------------------------------------
+
+    // Update the scene
+    UpdateInstanceData();
+
+    // Enable/disable MSAA rendering
+    if (renderMode.msaaLevel > 1)
+        glEnable(GL_MULTISAMPLE);
+    else
+        glDisable(GL_MULTISAMPLE);
+
+    // Enable backface culling
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+
+    // Enable/disable wireframe
+    glPolygonMode(GL_FRONT_AND_BACK, renderMode.wireframe ? GL_LINE : GL_FILL);
+
+    // Enable depth test, clamp, and write
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_DEPTH_CLAMP);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_TRUE);
+
+    // Clear the color and depth buffer
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+    // Render the scene into the depth buffer
+    //glColorMask(false, false, false, false);
+    depthPass(_pointLights[light].position);
 }
 
 void Scene::Draw(const Camera &camera, const RenderMode &renderMode, bool carmackReverse)
@@ -516,31 +594,6 @@ void Scene::Draw(const Camera &camera, const RenderMode &renderMode, bool carmac
         glm::vec3(0.0f), 0.0f, 0.0f);
     DrawObjects(shaderProgram[ShaderProgram::InstancingDepthPass], RenderPass::DepthPass, camera, glm::vec3(0.0f), glm::vec4(0.0f),
         glm::vec3(0.0f), 0.0f, 0.0f);
-  };
-
-  // --------------------------------------------------------------------------
-  // Depth pass for a spotlight:
-  // TODO: depth pass doesnt need lightinfo, this is BS
-  // --------------------------------------------------------------------------
-  auto spotLightSourceDepthPass = [this, &renderMode, &camera](const glm::vec3& lightPosition, const glm::vec4& lightColor, 
-      const glm::vec3& lightDirection, const float& cutOff, const float& outerCutOff)
-  {
-      // Add the uniform of light projection and view matrices
-      float near_plane = 1.0f, far_plane = 1000.1f;
-      const unsigned int SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
-      glm::mat4x4 lightProjectionMatrix = glm::perspective(glm::radians(45.0f), (GLfloat)SHADOW_WIDTH / (GLfloat)SHADOW_HEIGHT, near_plane, far_plane);
-      GLint loc = glGetUniformLocation(shaderProgram[ShaderProgram::LightSourceDepthPass], "lightProjection");
-      glUniformMatrix4fv(loc, 1, GL_FALSE, glm::value_ptr(lightProjectionMatrix));
-      
-      glm::mat4x4 lightViewMatrix = glm::lookAt(lightPosition, lightPosition + lightDirection, glm::vec3(0.0, 1.0, 0.0));
-      loc = glGetUniformLocation(shaderProgram[ShaderProgram::LightSourceDepthPass], "lightView");
-      glUniformMatrix4fv(loc, 1, GL_FALSE, glm::value_ptr(lightViewMatrix));
-
-      // Render the scene as usual, but from the light source position
-      DrawBackground(shaderProgram[ShaderProgram::LightSourceDepthPass], RenderPass::DepthPass, camera, lightPosition, lightColor, 
-          lightDirection, cutOff, outerCutOff);
-      
-      // TODO: DrawObjects(shaderProgram[ShaderProgram::InstancingDepthPass], RenderPass::DepthPass, camera, lightPosition, lightColor, lightDirection, cutOff, outerCutOff);
   };
 
   // --------------------------------------------------------------------------
@@ -668,10 +721,6 @@ void Scene::Draw(const Camera &camera, const RenderMode &renderMode, bool carmac
       // Enable stencil test and clear the stencil buffer
       glClear(GL_STENCIL_BUFFER_BIT);
       glDisable(GL_STENCIL_TEST);
-
-      // Draw scene depth from the point of view of light source
-      //glColorMask(false, false, false, false);
-      //spotLightSourceDepthPass(_spotLights[i].position, _spotLights[i].color, _spotLights[i].direction, _spotLights[i].cutOff, _spotLights[i].outerCutOff);
 
       // Draw direct light utilizing stenciled shadows, enable color write
       glColorMask(true, true, true, true);

@@ -69,6 +69,7 @@ public:
   void Draw(const Camera& camera, const RenderMode& renderMode, bool carmackReverse);
   // Draw the scene
   void DrawDepthSingleSpotLight(const Camera& camera, const RenderMode& renderMode, int);
+  void DrawDepthSinglePointLight(const Camera& camera, const RenderMode& renderMode, int);
   // Return the generic VAO for rendering
   GLuint GetGenericVAO() { return _vao; }
 
@@ -117,7 +118,8 @@ private:
   // Helper method to update transformation uniform block
   void UpdateTransformBlock(const Camera& camera);
   // Helper method to update transformation uniform block
-  void UpdateTransformBlockSingleSpotLight(const float&);
+  void UpdateTransformBlockSingleSpotLight(const int&);
+  void UpdateTransformBlockSinglePointLight(const int&);
   // Draw the backdrop, floor and walls
   void DrawBackground(GLuint program, RenderPass renderPass, const Camera &camera, const glm::vec3 &lightPosition, const glm::vec4 &lightColor,
       const glm::vec3& lightDirection, const float& cutOff, const float& outerCutOff);
