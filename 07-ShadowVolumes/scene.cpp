@@ -19,7 +19,7 @@ static const glm::vec3 scale = glm::vec3(13.0f, 2.0f, 13.0f);
 // Offset for lights movement curve
 static const glm::vec3 offset = glm::vec3(0.0f, 3.0f, 0.0f);
 float near_plane = 0.1f;
-float far_plane = 25.0f;
+float far_plane = 40.0f;
 const unsigned int SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
 
 // Lissajous curve position calculation based on the parameters
@@ -335,10 +335,10 @@ void Scene::UpdateProgramData(GLuint program, RenderPass renderPass, const Camer
       std::vector<glm::mat4> shadowTransforms;
       shadowTransforms.push_back(shadowProj * glm::lookAt(lightPosition, lightPosition + glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f)));
       shadowTransforms.push_back(shadowProj * glm::lookAt(lightPosition, lightPosition + glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f)));
-      shadowTransforms.push_back(shadowProj * glm::lookAt(lightPosition, lightPosition + glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)));
-      shadowTransforms.push_back(shadowProj * glm::lookAt(lightPosition, lightPosition + glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f)));
-      shadowTransforms.push_back(shadowProj * glm::lookAt(lightPosition, lightPosition + glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, -1.0f, 0.0f)));
+      shadowTransforms.push_back(shadowProj * glm::lookAt(lightPosition, lightPosition + glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f)));
+      shadowTransforms.push_back(shadowProj * glm::lookAt(lightPosition, lightPosition + glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)));
       shadowTransforms.push_back(shadowProj * glm::lookAt(lightPosition, lightPosition + glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, -1.0f, 0.0f)));
+      shadowTransforms.push_back(shadowProj * glm::lookAt(lightPosition, lightPosition + glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, -1.0f, 0.0f)));
       
       for (unsigned int i = 0; i < 6; ++i) {
           const std::string &name = "shadowMatrices[" + std::to_string(i) + "]";
@@ -573,7 +573,6 @@ void Scene::DrawLightSinglePointLight(const Camera& camera, const RenderMode& re
     // Note: for depth primed geometry, it would be the best option to also set depth function to GL_EQUAL
 
     // For each light we need to render the scene with its contribution
-    for (int i = 0; i < _numPointLights; ++i)
     {
         // Enable stencil test and clear the stencil buffer
         //glClear(GL_STENCIL_BUFFER_BIT);
@@ -586,11 +585,11 @@ void Scene::DrawLightSinglePointLight(const Camera& camera, const RenderMode& re
         glColorMask(true, true, true, true);
      
         // Angle for pointlights is explained by the fact that pointlights can be simulated by a 180 degree half-angle spotlight
-        lightPass(RenderPass::DirectLight, _pointLights[i].position, _pointLights[i].color,
+        lightPass(RenderPass::DirectLight, _pointLights[light].position, _pointLights[light].color,
             glm::vec3(1.0f), glm::cos(glm::radians(180.0f)), glm::cos(glm::radians(180.0f)));
 
         glDisable(GL_STENCIL_TEST);
-        lightPass(RenderPass::AmbientLight, _pointLights[i].position, _pointLights[i].color,
+        lightPass(RenderPass::AmbientLight, _pointLights[light].position, _pointLights[light].color,
             glm::vec3(1.0f), glm::cos(glm::radians(180.0f)), glm::cos(glm::radians(180.0f)));
     }
 
@@ -604,7 +603,6 @@ void Scene::DrawDepthSinglePointLight(const Camera& camera, const RenderMode& re
 
     auto depthPass = [this, &renderMode, &camera](const glm::vec3& lightPosition)
     {
-        // No need to pass real light position and color as we don't need them in the depth pass
         DrawBackground(shaderProgram[ShaderProgram::DefaultPointLightDepthPass], RenderPass::DepthPass, camera, lightPosition, glm::vec4(0.0f),
             glm::vec3(0.0f), 0.0f, 0.0f);
         DrawObjects(shaderProgram[ShaderProgram::InstancingPointLightDepthPass], RenderPass::DepthPass, camera, lightPosition, glm::vec4(0.0f),
@@ -622,7 +620,7 @@ void Scene::DrawDepthSinglePointLight(const Camera& camera, const RenderMode& re
     else
         glDisable(GL_MULTISAMPLE);
 
-    // Enable backface culling
+    // Enable culling
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
 

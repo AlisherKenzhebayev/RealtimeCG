@@ -684,20 +684,20 @@ in VertexData
 layout (location = 0) out vec4 color;
 
 // Shadow calculation (learnOpenGl)
-float ShadowCalculation(vec4 fragPos)
+float ShadowCalculation(vec4 fragPos, vec3 normal, vec3 lightDir)
 {
     // get vector between fragment position and light position
     vec3 fragToLight = fragPos.xyz - lightPosWS.xyz;
     // use the light to fragment vector to sample from the depth map
-    float closestDepth = texture(depthMap, fragToLight).r;
+    float closestDepth = texture(depthMap, vec3(fragToLight.x, fragToLight.y, -fragToLight.z)).r;
     // it is currently in linear range between [0,1]. Re-transform back to original value
     closestDepth *= far_plane;
     // now get current linear depth as the length between the fragment and light position
     float currentDepth = length(fragToLight);
     // now test for shadows
 
-    // TODO: modulate the bias
-    float bias = 0.00; 
+    // modulate the bias
+    float bias = max(0.05 * (1.0 - dot(normal, lightDir)), 0.005);
     float shadow = currentDepth -  bias > closestDepth ? 1.0 : 0.0;
 
     return shadow;
@@ -761,18 +761,10 @@ void main()
 
   vec3 finalColor;
                                                    
-  float shadow = ShadowCalculation(vIn.worldPos);
+  float shadow = ShadowCalculation(vIn.worldPos, normal, lightDir);
   // Calculate the final color
   finalColor = (ambient + (1.0 - shadow) * (diffuse + specular)) * albedo;
 
-    // get vector between fragment position and light position
-    vec3 fragToLight = vIn.worldPos.xyz - lightPosWS.xyz;
-    // use the light to fragment vector to sample from the depth map    
-    float closestDepth = texture(depthMap, fragToLight).r;
-    // it is currently in linear range between [0,1]. Re-transform back to original value
-    closestDepth *= far_plane;
-    
-    finalColor = vec3(closestDepth / far_plane);
   color = vec4(finalColor, 1.0f);
 }
 )",

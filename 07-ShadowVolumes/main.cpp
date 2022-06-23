@@ -763,11 +763,11 @@ int main()
     return -1;
   }
 
-  int pointLights = 1;
+  int pointLights = 2;
   int spotLights = 1;
 
   // Scene initialization
-  scene.Init(3, pointLights, spotLights);
+  scene.Init(10, pointLights, spotLights);
 
   // Enter the application main loop
   mainLoop(pointLights, spotLights);
