@@ -12,7 +12,7 @@ namespace ShaderProgram
 {
   enum
   {
-    Default, DefaultDepthPass, Instancing, InstancingDepthPass, InstancedShadowVolume, PointRendering, Tonemapping, DefaultPointLightDepthPass, InstancingPointLightDepthPass, DefaultPointLightShadowMapPass, InstancingPointLightShadowMapPass, NumShaderPrograms
+    Default, DefaultDepthPass, Instancing, InstancingDepthPass, InstancedShadowVolume, PointRendering, Tonemapping, DefaultPointLightDepthPass, InstancingPointLightDepthPass, DefaultPointLightShadowMapPass, InstancingPointLightShadowMapPass, DefaultSpotLightShadowMapPass, InstancingSpotLightShadowMapPass, NumShaderPrograms
   };
 }
 
@@ -29,7 +29,7 @@ namespace VertexShader
 {
   enum
   {
-    Default, Instancing, InstancedShadowVolume, Point, ScreenQuad, DefaultPointLightDepthPass, InstancingPointLightDepthPass, NumVertexShaders
+    Default, Instancing, InstancedShadowVolume, Point, ScreenQuad, DefaultPointLightDepthPass, InstancingPointLightDepthPass, DefaultSpotLight, InstancingSpotLight, NumVertexShaders
   };
 }
 
@@ -380,6 +380,154 @@ void main()
   gl_Position = vOut.worldPos;
 }
 )",
+// ----------------------------------------------------------------------------
+// Default spotlight VS shader
+// ----------------------------------------------------------------------------
+R"(
+#version 330 core
+
+// The following is not not needed since GLSL version #430
+#extension GL_ARB_explicit_uniform_location : require
+
+// The following is not not needed since GLSL version #420
+#extension GL_ARB_shading_language_420pack : require
+
+// Uniform blocks, i.e., constants
+layout (std140, binding = 0) uniform TransformBlock
+{
+  // Transposed worldToView matrix - stored compactly as an array of 3 x vec4
+  mat3x4 worldToView;
+  mat4x4 projection;
+};
+
+// Model to world transformation separately, takes 4 slots!
+layout (location = 0) uniform mat4x3 modelToWorld;
+layout (location = 1) uniform mat4 lightSpaceView;
+layout (location = 2) uniform mat4 lightSpaceProj;
+
+// Vertex attribute block, i.e., input
+layout (location = 0) in vec3 position;
+layout (location = 1) in vec3 normal;
+layout (location = 2) in vec3 tangent;
+layout (location = 3) in vec2 texCoord;
+
+// Vertex output
+out VertexData
+{
+  vec2 texCoord;
+  vec3 tangent;
+  vec3 bitangent;
+  vec3 normal;
+  vec4 worldPos;
+  vec4 lightSpacePos;
+} vOut;
+
+void main()
+{
+  // Pass texture coordinates to the fragment shader
+  vOut.texCoord = texCoord.st;
+
+  // Construct the normal transformation matrix
+  mat3 normalTransform = transpose(inverse(mat3(modelToWorld)));
+
+  // Create the tangent space matrix and pass it to the fragment shader
+  vOut.normal = normalize(normalTransform * normal);
+  vOut.tangent = normalize(mat3(modelToWorld) * tangent);
+  vOut.bitangent = cross(vOut.tangent, vOut.normal);
+
+  // Transform vertex position
+  vOut.worldPos = vec4(modelToWorld * vec4(position.xyz, 1.0f), 1.0f);
+  vOut.lightSpacePos = lightSpaceView * vOut.worldPos;
+  vOut.lightSpacePos = lightSpaceProj * vOut.lightSpacePos;
+
+  // We must multiply from the left because of transposed worldToView
+  vec4 viewPos = vec4(vOut.worldPos * worldToView, 1.0f);
+
+  gl_Position = projection * viewPos;
+}
+)",
+// ----------------------------------------------------------------------------
+// Instancing spotlight VS shader
+// ----------------------------------------------------------------------------
+R"(
+#version 330 core
+
+// The following is not not needed since GLSL version #430
+#extension GL_ARB_explicit_uniform_location : require
+
+// The following is not not needed since GLSL version #420
+#extension GL_ARB_shading_language_420pack : require
+
+// Uniform blocks, i.e., constants
+layout (std140, binding = 0) uniform TransformBlock
+{
+  // Transposed worldToView matrix - stored compactly as an array of 3 x vec4
+  mat3x4 worldToView;
+  mat4x4 projection;
+};
+
+// Vertex attribute block, i.e., input
+layout (location = 0) in vec3 position;
+layout (location = 1) in vec3 normal;
+layout (location = 2) in vec3 tangent;
+layout (location = 3) in vec2 texCoord;
+
+// Must match the structure on the CPU side
+struct InstanceData
+{
+  // Transposed worldToView matrix - stored compactly as an array of 3 x vec4
+  mat3x4 modelToWorld;
+};
+
+// Uniform buffer used for instances
+layout (std140, binding = 1) uniform InstanceBuffer
+{
+  // We are limited to 4096 vec4 registers in total, hence the maximum number of instances
+  // being 1024 meaning we could fit another vec4 worth of data
+  InstanceData instanceBuffer[1024];
+};
+
+layout (location = 1) uniform mat4 lightSpaceView;
+layout (location = 2) uniform mat4 lightSpaceProj;
+
+// Vertex output
+out VertexData
+{
+  vec2 texCoord;
+  vec3 tangent;
+  vec3 bitangent;
+  vec3 normal;
+  vec4 worldPos;
+  vec4 lightSpacePos;
+} vOut;
+
+void main()
+{
+  // Pass texture coordinates to the fragment shader
+  vOut.texCoord = texCoord.st;
+
+  // Retrieve the model to world matrix from the instance buffer
+  mat3x4 modelToWorld = instanceBuffer[gl_InstanceID].modelToWorld;
+
+  // Construct the normal transformation matrix
+  mat3 normalTransform = transpose(inverse(mat3(modelToWorld)));
+
+  // Create the tangent space matrix and pass it to the fragment shader
+  // Note: we must multiply from the left because of transposed modelToWorld
+  vOut.normal = normalize(normal * normalTransform);
+  vOut.tangent = normalize(tangent * mat3(modelToWorld));
+  vOut.bitangent = cross(vOut.tangent, vOut.normal);
+
+  // Transform vertex position, note we multiply from the left because of transposed modelToWorld
+  vOut.worldPos = vec4(vec4(position.xyz, 1.0f) * modelToWorld, 1.0f);
+  vOut.lightSpacePos = lightSpaceView * vOut.worldPos;
+  vOut.lightSpacePos = lightSpaceProj * vOut.lightSpacePos;
+
+  vec4 viewPos = vec4(vOut.worldPos * worldToView, 1.0f);
+
+  gl_Position = projection * viewPos;
+}
+)",
 ""};
 
 // ============================================================================
@@ -389,7 +537,7 @@ namespace FragmentShader
 {
   enum
   {
-    Default, SingleColor, Null, Tonemapping, Depth, PointLightDepthPass, PointLightShadowMapPass, NumFragmentShaders
+    Default, SingleColor, Null, Tonemapping, Depth, PointLightDepthPass, PointLightShadowMapPass, SpotLightShadowMapPass, NumFragmentShaders
   };
 }
 
@@ -667,7 +815,6 @@ layout (location = 8) uniform float cutoff;
 // Spotlight outer cutoff (cosines)
 layout (location = 9) uniform float outerCutoff;
 
-// Spotlight outer cutoff (cosines)
 layout (location = 10) uniform float far_plane;
 
 // Fragment shader inputs
@@ -688,17 +835,31 @@ float ShadowCalculation(vec4 fragPos, vec3 normal, vec3 lightDir)
 {
     // get vector between fragment position and light position
     vec3 fragToLight = fragPos.xyz - lightPosWS.xyz;
-    // use the light to fragment vector to sample from the depth map
-    float closestDepth = texture(depthMap, vec3(fragToLight.x, fragToLight.y, -fragToLight.z)).r;
-    // it is currently in linear range between [0,1]. Re-transform back to original value
-    closestDepth *= far_plane;
-    // now get current linear depth as the length between the fragment and light position
-    float currentDepth = length(fragToLight);
-    // now test for shadows
-
+    fragToLight = vec3(fragToLight.x, fragToLight.y, -fragToLight.z);
+    
+    // PCF
+    float shadow  = 0.0;
     // modulate the bias
     float bias = max(0.05 * (1.0 - dot(normal, lightDir)), 0.005);
-    float shadow = currentDepth -  bias > closestDepth ? 1.0 : 0.0;
+    float samples = 4.0;
+    float offset  = 0.05;
+    for(float x = -offset; x < offset; x += offset / (samples * 0.5))
+    {
+        for(float y = -offset; y < offset; y += offset / (samples * 0.5))
+        {
+            for(float z = -offset; z < offset; z += offset / (samples * 0.5))
+            {
+                // use the light to fragment vector to sample from the depth map
+                float closestDepth = texture(depthMap, fragToLight + vec3(x, y, z)).r; 
+                closestDepth *= far_plane;
+                float currentDepth = length(fragToLight + vec3(x, y, z));
+    
+                if(currentDepth - bias > closestDepth)
+                    shadow += 1.0;
+            }
+        }
+    }
+    shadow /= (samples * samples * samples);
 
     return shadow;
 }  
@@ -762,6 +923,157 @@ void main()
   vec3 finalColor;
                                                    
   float shadow = ShadowCalculation(vIn.worldPos, normal, lightDir);
+  // Calculate the final color
+  finalColor = (ambient + (1.0 - shadow) * (diffuse + specular)) * albedo;
+
+  color = vec4(finalColor, 1.0f);
+}
+)",
+// ----------------------------------------------------------------------------
+// Spot light FS shader for shadow maps (works with a depth texture, otherwise a copy of modified Default shader above)
+// ----------------------------------------------------------------------------
+R"(
+#version 330 core
+
+// The following is not not needed since GLSL version #430
+#extension GL_ARB_explicit_uniform_location : require
+
+// The following is not not needed since GLSL version #420
+#extension GL_ARB_shading_language_420pack : require
+
+// Texture sampler
+layout (binding = 0) uniform sampler2D Diffuse;
+layout (binding = 1) uniform sampler2D Normal;
+layout (binding = 2) uniform sampler2D Specular;
+layout (binding = 3) uniform sampler2D Occlusion;
+// depth texture binding
+layout (binding = 5) uniform sampler2D depthMap;
+
+// Note: explicit location because AMD APU drivers screw up position when linking against
+// the default vertex shader with mat4x3 modelToWorld at location 0 occupying 4 slots
+
+// Light position/direction
+layout (location = 4) uniform vec4 lightPosWS;
+// View position in world space coordinates
+layout (location = 5) uniform vec4 viewPosWS;
+// Light color
+layout (location = 6) uniform vec4 lightColor;
+
+// Light direction
+layout (location = 7) uniform vec3 lightDirection;
+// Spotlight cutoff (cosines)
+layout (location = 8) uniform float cutoff;
+// Spotlight outer cutoff (cosines)
+layout (location = 9) uniform float outerCutoff;
+
+
+// Fragment shader inputs
+in VertexData
+{
+  vec2 texCoord;
+  vec3 tangent;
+  vec3 bitangent;
+  vec3 normal;
+  vec4 worldPos;
+  vec4 lightSpacePos;
+} vIn;
+
+// Fragment shader outputs
+layout (location = 0) out vec4 color;
+
+// Shadow calculation (learnOpenGl)
+float ShadowCalculation(vec4 fragPos, vec3 normal, vec3 lightDir)
+{
+    // get texture coordinates from a perspective divide
+    vec3 projCoords = fragPos.xyz / fragPos.w;
+    projCoords = projCoords * 0.5 + 0.5;
+    float currentDepth = projCoords.z;
+
+    // PCF
+    float shadow  = 0.0;
+    // modulate the bias
+    float bias = max(0.02 * (1.0 - dot(normal, lightDir)), 0.005);
+    vec2 texelSize = 1.0 / textureSize(depthMap, 0);
+
+    for(float x = -1; x <= 1; x++)
+    {
+        for(float y = -1; y <= 1; y++)
+        {
+            float closestDepth = texture(depthMap, projCoords.xy + vec2(x, y) * texelSize).r;     
+            if(currentDepth - bias > closestDepth)
+                shadow += 1.0;
+        }
+    }
+    shadow /= 9.0;
+    
+    if(projCoords.z > 1.0)
+        shadow = 0.0;
+
+    //float closestDepth = texture(depthMap, projCoords.xy).r;     
+    //shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
+
+    return shadow;
+}  
+
+void main()
+{
+  // Shortcut variables for ambient/diffuse light component intensity modulation
+  const float ambientIntensity = lightColor.a;
+  const float directIntensity = lightPosWS.w;
+
+  // Sample textures
+  vec3 albedo = texture(Diffuse, vIn.texCoord.st).rgb;
+  vec3 noSample = texture(Normal, vIn.texCoord.st).rgb;
+  float specSample = texture(Specular, vIn.texCoord.st).r;
+  float occlusion = texture(Occlusion, vIn.texCoord.st).r;
+
+  // Calculate world-space normal
+  mat3 STN = {vIn.tangent, vIn.bitangent, vIn.normal};
+  vec3 normal = STN * (noSample * 2.0f - 1.0f);
+
+  // Calculate the lighting direction and distance
+  vec3 lightDir = lightPosWS.xyz - vIn.worldPos.xyz;
+  float lengthSq = dot(lightDir, lightDir);
+  float length = sqrt(lengthSq);
+  lightDir /= length;
+
+  // Calculate the angle between the -spotlight direction and lightDir
+  float theta = dot(normalize(lightDir), normalize(-lightDirection));
+  float epsilon   = cutoff - outerCutoff;
+  float intensity = clamp((theta - outerCutoff) / epsilon, 0.0, 1.0);    
+
+  // Calculate the view and reflection/halfway direction
+  vec3 viewDir = normalize(viewPosWS.xyz - vIn.worldPos.xyz);
+  // Cheaper approximation of reflected direction = reflect(-lightDir, normal)
+  vec3 halfDir = normalize(viewDir + lightDir);
+
+  // Calculate diffuse and specular coefficients
+  float NdotL = max(0.0f, dot(normal, lightDir));
+  float NdotH = max(0.0f, dot(normal, halfDir));
+
+  // Calculate horizon fading factor
+  float horizon = clamp(1.0f + dot(vIn.normal, lightDir), 0.0f, 1.0f);
+  horizon *= horizon;
+  horizon *= horizon;
+  horizon *= horizon;
+  horizon *= horizon;
+
+  // Calculate the Phong model terms: ambient, diffuse, specular
+  vec3 ambient = ambientIntensity * occlusion * lightColor.rgb;
+  vec3 diffuse = directIntensity * NdotL * lightColor.rgb;
+  vec3 specular = directIntensity * specSample * lightColor.rgb * pow(NdotH, 32.0f);   // Defines shininess
+  
+  // Spotlight, Soft edges
+  diffuse = diffuse * intensity;   
+  specular = specular * intensity;   
+
+  // Light attenuation with squared distance
+  diffuse = diffuse / lengthSq;
+  specular = specular / lengthSq;
+
+  vec3 finalColor;
+                                                   
+  float shadow = ShadowCalculation(vIn.lightSpacePos, normal, lightDir);
   // Calculate the final color
   finalColor = (ambient + (1.0 - shadow) * (diffuse + specular)) * albedo;
 

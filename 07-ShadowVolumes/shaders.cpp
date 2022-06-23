@@ -125,7 +125,6 @@ bool compileShaders()
   }
   uniformBlockBinding(shaderProgram[ShaderProgram::InstancingPointLightDepthPass]);
 
-  // Shader program for non-instanced geometry w/o color
   shaderProgram[ShaderProgram::DefaultPointLightShadowMapPass] = glCreateProgram();
   glAttachShader(shaderProgram[ShaderProgram::DefaultPointLightShadowMapPass], vertexShader[VertexShader::Default]);
   glAttachShader(shaderProgram[ShaderProgram::DefaultPointLightShadowMapPass], fragmentShader[FragmentShader::PointLightShadowMapPass]);
@@ -146,6 +145,27 @@ bool compileShaders()
       return false;
   }
   uniformBlockBinding(shaderProgram[ShaderProgram::InstancingPointLightShadowMapPass]);
+
+  shaderProgram[ShaderProgram::DefaultSpotLightShadowMapPass] = glCreateProgram();
+  glAttachShader(shaderProgram[ShaderProgram::DefaultSpotLightShadowMapPass], vertexShader[VertexShader::DefaultSpotLight]);
+  glAttachShader(shaderProgram[ShaderProgram::DefaultSpotLightShadowMapPass], fragmentShader[FragmentShader::SpotLightShadowMapPass]);
+  if (!ShaderCompiler::LinkProgram(shaderProgram[ShaderProgram::DefaultSpotLightShadowMapPass]))
+  {
+      cleanUp();
+      return false;
+  }
+  uniformBlockBinding(shaderProgram[ShaderProgram::DefaultSpotLightShadowMapPass]);
+
+  // Shader program for non-instanced geometry w/o color
+  shaderProgram[ShaderProgram::InstancingSpotLightShadowMapPass] = glCreateProgram();
+  glAttachShader(shaderProgram[ShaderProgram::InstancingSpotLightShadowMapPass], vertexShader[VertexShader::InstancingSpotLight]);
+  glAttachShader(shaderProgram[ShaderProgram::InstancingSpotLightShadowMapPass], fragmentShader[FragmentShader::SpotLightShadowMapPass]);
+  if (!ShaderCompiler::LinkProgram(shaderProgram[ShaderProgram::InstancingSpotLightShadowMapPass]))
+  {
+      cleanUp();
+      return false;
+  }
+  uniformBlockBinding(shaderProgram[ShaderProgram::InstancingSpotLightShadowMapPass]);
 
 
   // Shader program for non-instanced geometry w/o color

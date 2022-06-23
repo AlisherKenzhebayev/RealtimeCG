@@ -664,7 +664,7 @@ void renderScene(int pointLights, int spotLights)
         
         scene.DrawDepthSingleSpotLight(camera, renderMode, light);
         
-        glActiveTexture(GL_TEXTURE0);
+        glActiveTexture(GL_TEXTURE5);
         glBindTexture(GL_TEXTURE_2D, depthMap);
 
         // Additively draw the light using the depth texture
@@ -676,7 +676,7 @@ void renderScene(int pointLights, int spotLights)
 
         // Additively draw the light using the depth texture
         // Create a separate light pass for spotlights 
-        //scene.DrawLightSinglePointLight(camera, renderMode, light);
+        scene.DrawLightSingleSpotLight(camera, renderMode, light);
 
         glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -763,7 +763,7 @@ int main()
     return -1;
   }
 
-  int pointLights = 2;
+  int pointLights = 1;
   int spotLights = 1;
 
   // Scene initialization

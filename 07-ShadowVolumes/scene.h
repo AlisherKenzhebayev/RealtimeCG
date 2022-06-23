@@ -71,7 +71,8 @@ public:
   // Depth pass for lights
   void DrawDepthSingleSpotLight(const Camera& camera, const RenderMode& renderMode, int);
   void DrawDepthSinglePointLight(const Camera& camera, const RenderMode& renderMode, int);
- 
+
+  void DrawLightSingleSpotLight(const Camera& camera, const RenderMode& renderMode, int);
   void DrawLightSinglePointLight(const Camera& camera, const RenderMode& renderMode, int);
  
   // Return the generic VAO for rendering
