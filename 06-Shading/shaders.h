@@ -12,7 +12,7 @@ namespace ShaderProgram
 {
   enum
   {
-    Default, Instancing, PointRendering, Tonemapping, NumShaderPrograms
+    Default, Instancing, PointRendering, Tonemapping, DefaultNormal, InstancingNormal, NumShaderPrograms
   };
 }
 
@@ -230,7 +230,7 @@ namespace FragmentShader
 {
   enum
   {
-    Default, SingleColor, Tonemapping, NumFragmentShaders
+    Default, Normal, SingleColor, Tonemapping, NumFragmentShaders
   };
 }
 
@@ -330,6 +330,63 @@ void main()
   // Calculate the final color
   vec3 finalColor = albedo * (ambient + diffuse) + specular;
   color = vec4(finalColor, 1.0f);
+}
+)",
+// ----------------------------------------------------------------------------
+// world-space Normal map fragment shader source
+// ----------------------------------------------------------------------------
+R"(
+#version 330 core
+
+// The following is not not needed since GLSL version #430
+#extension GL_ARB_explicit_uniform_location : require
+
+// The following is not not needed since GLSL version #420
+#extension GL_ARB_shading_language_420pack : require
+
+// Texture sampler
+layout (binding = 0) uniform sampler2D Diffuse;
+layout (binding = 1) uniform sampler2D Normal;
+layout (binding = 2) uniform sampler2D Specular;
+layout (binding = 3) uniform sampler2D Occlusion;
+
+// Note: explicit location because AMD APU drivers screw up position when linking against
+// the default vertex shader with mat4x3 modelToWorld at location 0 occupying 4 slots
+
+// Light position/direction
+layout (location = 4) uniform vec3 lightPosWS;
+// View position in world space coordinates
+layout (location = 5) uniform vec4 viewPosWS;
+
+// Fragment shader inputs
+in VertexData
+{
+  vec2 texCoord;
+  vec3 tangent;
+  vec3 bitangent;
+  vec3 normal;
+  vec4 worldPos;
+} vIn;
+
+// Fragment shader outputs
+layout (location = 0) out vec4 color;
+
+void main()
+{
+  // Normally you'd pass this as another uniform
+  vec3 lightColor = vec3(15.0f, 15.0f, 15.0f);
+
+  // Sample textures
+  vec3 albedo = texture(Diffuse, vIn.texCoord.st).rgb;
+  vec3 noSample = texture(Normal, vIn.texCoord.st).rgb;
+  float specSample = texture(Specular, vIn.texCoord.st).r;
+  float occlusion = texture(Occlusion, vIn.texCoord.st).r;
+
+  // Calculate world-space normal
+  mat3 STN = {vIn.tangent, vIn.bitangent, vIn.normal};
+  vec3 normal = STN * (noSample * 2.0f - 1.0f);
+
+  color = vec4(normal, 1.0f);
 }
 )",
 // ----------------------------------------------------------------------------

@@ -96,6 +96,27 @@ bool compileShaders()
   uniformBlockBinding(shaderProgram[ShaderProgram::Instancing]);
   uniformBlockBinding(shaderProgram[ShaderProgram::Instancing], "InstanceBuffer", 1);
 
+  shaderProgram[ShaderProgram::DefaultNormal] = glCreateProgram();
+  glAttachShader(shaderProgram[ShaderProgram::DefaultNormal], vertexShader[VertexShader::Default]);
+  glAttachShader(shaderProgram[ShaderProgram::DefaultNormal], fragmentShader[FragmentShader::Normal]);
+  if (!ShaderCompiler::LinkProgram(shaderProgram[ShaderProgram::DefaultNormal]))
+  {
+      cleanUp();
+      return false;
+  }
+  uniformBlockBinding(shaderProgram[ShaderProgram::DefaultNormal]);
+
+  shaderProgram[ShaderProgram::InstancingNormal] = glCreateProgram();
+  glAttachShader(shaderProgram[ShaderProgram::InstancingNormal], vertexShader[VertexShader::Instancing]);
+  glAttachShader(shaderProgram[ShaderProgram::InstancingNormal], fragmentShader[FragmentShader::Normal]);
+  if (!ShaderCompiler::LinkProgram(shaderProgram[ShaderProgram::InstancingNormal]))
+  {
+      cleanUp();
+      return false;
+  }
+  uniformBlockBinding(shaderProgram[ShaderProgram::InstancingNormal]);
+  uniformBlockBinding(shaderProgram[ShaderProgram::InstancingNormal], "InstanceBuffer", 1);
+
   shaderProgram[ShaderProgram::PointRendering] = glCreateProgram();
   glAttachShader(shaderProgram[ShaderProgram::PointRendering], vertexShader[VertexShader::Point]);
   glAttachShader(shaderProgram[ShaderProgram::PointRendering], fragmentShader[FragmentShader::SingleColor]);
