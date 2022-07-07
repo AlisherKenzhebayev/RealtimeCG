@@ -16,6 +16,7 @@
 #include <Textures.h>
 
 #include "shaders.h"
+#include "main.h"
 
 // Set to 1 to create debugging context that reports errors, requires OpenGL 4.3!
 #define _ENABLE_OPENGL_DEBUG 0
@@ -59,6 +60,7 @@ float nearClipPlane = 0.1f;
 float farClipPlane = 100.1f;
 // Camera FOV
 float fov = 45.0f;
+int toon_light_levels = 4;
 
 // ----------------------------------------------------------------------------
 
@@ -121,6 +123,13 @@ GLuint renderTarget = 0;
 // Our depth stencil for rendering
 GLuint depthStencil = 0;
 
+// Sobel framebuffer object
+GLuint fboSobel = 0;
+// Additional textures for saving, for Sobel
+GLuint sobelDepth = 0;
+// Our depth stencil for rendering
+GLuint sobelColor = 0;
+
 // Vsync on?
 bool vsync = true;
 // Depth test on?
@@ -157,6 +166,7 @@ GLuint loadedTextures[LoadedTextures::NumTextures] = {0};
 
 // Forward declaration for the framebuffer creation
 void createFramebuffer(int width, int height, GLsizei MSAA);
+void createSobelFramebuffer(int width, int height, GLsizei MSAA);
 
 // Callback for handling GLFW errors
 void errorCallback(int error, const char* description)
@@ -181,6 +191,7 @@ void resizeCallback(GLFWwindow* window, int width, int height)
   camera.SetProjection(fov, (float)width / (float)height, nearClipPlane, farClipPlane);
 
   createFramebuffer(width, height, msaaLevel);
+  createSobelFramebuffer(width, height, msaaLevel);
 }
 
 // Callback for handling mouse movement over the window - called when mouse movement is detected
@@ -211,6 +222,7 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
     }
 
     createFramebuffer(mainWindow.width, mainWindow.height, msaaLevel);
+    createSobelFramebuffer(mainWindow.width, mainWindow.height, msaaLevel);
   }
 
   // Enable/disable wireframe rendering
@@ -264,6 +276,24 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
     fov += 1.0f;
     if (fov >= 180.0f)
       fov = 179.0f;
+  }
+
+  // Toon division +
+  if (key == GLFW_KEY_RIGHT)
+  {
+      toon_light_levels += 1;
+      if (toon_light_levels > 99) {
+          toon_light_levels = 40;
+      }
+  }
+
+  // Toon division -
+  if (key == GLFW_KEY_LEFT)
+  {
+      toon_light_levels -= 1;
+      if (toon_light_levels < 1) {
+          toon_light_levels = 1;
+      }
   }
 
   if (key == GLFW_KEY_BACKSPACE && action == GLFW_PRESS)
@@ -344,9 +374,9 @@ void createGeometry()
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
   }
 
-  // Position the first cube half a meter above origin
+  // Position the first some above origin
   cubePositions.reserve(numCubes);
-  cubePositions.push_back(glm::vec3(0.0f, 0.5f, 0.0f));
+  cubePositions.push_back(glm::vec3(0.0f, 0.7f, 0.0f));
 
   // Generate random positions for the rest of the cubes
   for (int i = 1; i <= numCubes; ++i)
@@ -505,31 +535,35 @@ void createFramebuffer(int width, int height, GLsizei MSAA)
   // --------------------------------------------------------------------------
   // Depth buffer texture:
   // --------------------------------------------------------------------------
-
+  
   // Delete it if necessary
-  if (glIsRenderbuffer(depthStencil))
+  if (glIsTexture(depthStencil))
   {
-    glDeleteRenderbuffers(1, &depthStencil);
+    glDeleteTextures(1, &depthStencil);
     depthStencil = 0;
   }
 
-  // Create the depth-stencil name
+  // Create the depth-stencil name 
   if (depthStencil == 0)
   {
-    glGenRenderbuffers(1, &depthStencil);
+      glGenTextures(1, &depthStencil);
   }
 
-  // Bind and recreate the depth-stencil Render Buffer Object
-  glBindRenderbuffer(GL_RENDERBUFFER, depthStencil);
+  // Bind and recreate the render target texture
   if (MSAA > 1)
   {
-    glRenderbufferStorageMultisample(GL_RENDERBUFFER, MSAA, GL_DEPTH_COMPONENT32F, width, height);
+      glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, depthStencil);
+      glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, MSAA, GL_DEPTH24_STENCIL8, width, height, GL_TRUE);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D_MULTISAMPLE, depthStencil, 0);
   }
   else
   {
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT32F, width, height);
+      glBindTexture(GL_TEXTURE_2D, depthStencil);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthStencil, 0);
   }
-  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthStencil);
 
   // Set the list of draw buffers.
   GLenum drawBuffers[] = {GL_COLOR_ATTACHMENT0};
@@ -544,6 +578,99 @@ void createFramebuffer(int width, int height, GLsizei MSAA)
 
   // Bind back the window system provided framebuffer
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void createSobelFramebuffer(int width, int height, GLsizei MSAA)
+{
+    // Bind the default framebuffer
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // Generate the FBO if necessary
+    if (!fboSobel)
+    {
+        glGenFramebuffers(1, &fboSobel);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, fboSobel);
+
+    // --------------------------------------------------------------------------
+    // Color Sobel
+    // --------------------------------------------------------------------------
+
+    // Delete it if necessary
+    if (glIsTexture(sobelColor))
+    {
+        glDeleteTextures(1, &sobelColor);
+        sobelColor = 0;
+    }
+
+    // Create the texture name
+    if (sobelColor == 0)
+    {
+        glGenTextures(1, &sobelColor);
+    }
+
+    // Bind and recreate the render target texture
+    if (MSAA > 1)
+    {
+        glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, sobelColor);
+        glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, MSAA, GL_RGB16F, width, height, GL_TRUE);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D_MULTISAMPLE, sobelColor, 0);
+    }
+    else
+    {
+        glBindTexture(GL_TEXTURE_2D, sobelColor);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, width, height, 0, GL_RGB, GL_FLOAT, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sobelColor, 0);
+    }
+
+    // --------------------------------------------------------------------------
+    // Depth Sobel
+    // --------------------------------------------------------------------------
+
+    // Delete it if necessary
+    if (glIsTexture(sobelDepth))
+    {
+        glDeleteTextures(1, &sobelDepth);
+        sobelDepth = 0;
+    }
+
+    // Create the depth-stencil name 
+    if (sobelDepth == 0)
+    {
+        glGenTextures(1, &sobelDepth);
+    }
+
+    // Bind and recreate the render target texture
+    if (MSAA > 1)
+    {
+        glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, sobelDepth);
+        glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, MSAA, GL_DEPTH24_STENCIL8, width, height, GL_TRUE);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D_MULTISAMPLE, sobelDepth, 0);
+    }
+    else
+    {
+        glBindTexture(GL_TEXTURE_2D, sobelDepth);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, sobelDepth, 0);
+    }
+
+    // Set the list of draw buffers.
+    GLenum drawBuffers[] = { GL_COLOR_ATTACHMENT0 };
+    glDrawBuffers(1, drawBuffers);
+
+    // Check for completeness
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE)
+    {
+        printf("Failed to create sobel framebuffer: 0x%04X\n", status);
+    }
+
+    // Bind back the window system provided framebuffer
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 // Helper method for graceful shutdown
@@ -567,6 +694,8 @@ void shutDown()
   // Release the framebuffer
   glDeleteTextures(1, &renderTarget);
   glDeleteTextures(1, &depthStencil);
+  glDeleteTextures(1, &sobelColor);
+  glDeleteTextures(1, &sobelDepth);
   glDeleteFramebuffers(1, &fbo);
 
   // Release the generic VAO
@@ -655,6 +784,13 @@ void bindTextures(const GLuint &diffuse, const GLuint &normal, const GLuint &spe
   glActiveTexture(GL_TEXTURE0 + 3);
   glBindTexture(GL_TEXTURE_2D, occlusion);
   glBindSampler(3, textures.GetSampler(Sampler::Anisotropic));
+
+  // Bind renderTarget and depth as textures for Sobel edge detection
+  glActiveTexture(GL_TEXTURE0 + 4);
+  glBindTexture(GL_TEXTURE_2D, sobelColor);
+
+  glActiveTexture(GL_TEXTURE0 + 5);
+  glBindTexture(GL_TEXTURE_2D, sobelDepth);
 }
 
 // Helper function for creating and updating the instance data
@@ -670,7 +806,7 @@ void updateInstanceData()
   for (int i = 0; i < numCubes; ++i)
   {
     transformation = glm::translate(cubePositions[i]);
-    transformation *= glm::rotate(glm::radians(i * angle), glm::vec3(1.0f, 1.0f, 1.0f));
+    transformation *= glm::rotate(glm::radians((i + 1) * angle), glm::vec3(1.0f, 1.0f, 1.0f));
 
     instanceData[i].transformation = glm::transpose(transformation);
   }
@@ -696,6 +832,10 @@ void updateProgramData(GLuint program, const glm::vec3 &lightPosition)
   GLint viewPosLoc = glGetUniformLocation(program, "viewPosWS");
   glm::vec4 viewPos = camera.GetViewToWorld()[3];
   glUniform4f(viewPosLoc, viewPos.x, viewPos.y, viewPos.z, viewPos.w);
+
+  // Update the view position
+  GLint celLightLoc = glGetUniformLocation(program, "light_levels");
+  glUniform1i(celLightLoc, toon_light_levels);
 }
 
 // Helper method to update transformation uniform block
@@ -752,8 +892,8 @@ void renderScene()
   else
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-  // Clear the color and depth buffer
-  glClearColor(0.1f, 0.2f, 0.4f, 1.0f);
+  // Clear the depth buffer
+  glClearColor(0.0f, 0.1f, 0.2f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
   // --------------------------------------------------------------------------
@@ -821,51 +961,131 @@ void renderScene()
   // Unbind the shader program and other resources
   glBindVertexArray(0);
   glUseProgram(0);
+}
 
-  if (tonemapping)
-  {
-    // Unbind the framebuffer and bind the window system provided FBO
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+void displayFramebuffer() {
+    if (tonemapping)
+    {
+        // Unbind the framebuffer and bind the window system provided FBO
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    // Solid fill always
+        // Solid fill always
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+        // Disable multisampling and depth test
+        glDisable(GL_MULTISAMPLE);
+        glDisable(GL_DEPTH_TEST);
+
+        // Clear the color
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        // Tonemapping
+        glUseProgram(shaderProgram[ShaderProgram::Tonemapping]);
+
+        // Send in the required data
+        glUniform1f(0, (float)msaaLevel);
+
+        // Bind the HDR render target as texture
+        GLenum target = (msaaLevel > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(target, renderTarget);
+        glBindSampler(0, 0); // Very important!
+
+        // Draw fullscreen quad
+        glBindVertexArray(vao);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        // Unbind the shader program and other resources
+        glBindVertexArray(0);
+        glUseProgram(0);
+    }
+    else
+    {
+        // Just copy the render target to the screen
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+        glDrawBuffer(GL_BACK);
+        glBlitFramebuffer(0, 0, mainWindow.width, mainWindow.height, 0, 0, mainWindow.width, mainWindow.height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    }
+}
+
+void renderBuffers()
+{
+    updateTransformBlock();
+
+    // Bind the framebuffer
+    glBindFramebuffer(GL_FRAMEBUFFER, fboSobel);
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_TRUE);
+
+    // Enable/disable MSAA rendering
+    if (msaaLevel > 1)
+        glEnable(GL_MULTISAMPLE);
+    else
+        glDisable(GL_MULTISAMPLE);
+
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-    // Disable multisampling and depth test
-    glDisable(GL_MULTISAMPLE);
-    glDisable(GL_DEPTH_TEST);
-
-    // Clear the color
+    // Clear the color and depth buffer
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // Tonemapping
-    glUseProgram(shaderProgram[ShaderProgram::Tonemapping]);
+    // --------------------------------------------------------------------------
 
-    // Send in the required data
-    glUniform1f(0, (float)msaaLevel);
+    // Light position
+    static glm::vec3 lightPosition(-3.0f, 3.0f, 0.0f);
 
-    // Bind the HDR render target as texture
-    GLenum target = (msaaLevel > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(target, renderTarget);
-    glBindSampler(0, 0); // Very important!
+    // Draw the scene floor:
+    {
+        glUseProgram(shaderProgram[ShaderProgram::DefaultNormal]);
+        updateProgramData(shaderProgram[ShaderProgram::DefaultNormal], lightPosition);
 
-    // Draw fullscreen quad
-    glBindVertexArray(vao);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+        // Create transformation matrix - 4 columns, 3 rows, last (0, 0, 0, 1) implicit to save space
+        glm::mat4x3 transformation = glm::scale(glm::vec3(30.0f, 1.0f, 30.0f));
+        glUniformMatrix4x3fv(0, 1, GL_FALSE, glm::value_ptr(transformation));
+
+        bindTextures(loadedTextures[LoadedTextures::CheckerBoard], loadedTextures[LoadedTextures::Blue], loadedTextures[LoadedTextures::Grey], loadedTextures[LoadedTextures::White]);
+
+        glBindVertexArray(quad->GetVAO());
+        glDrawElements(GL_TRIANGLES, quad->GetIBOSize(), GL_UNSIGNED_INT, reinterpret_cast<void*>(0));
+    }
+
+    // --------------------------------------------------------------------------
+
+    // Draw cubes:
+    {
+        glUseProgram(shaderProgram[ShaderProgram::InstancingNormal]);
+
+        // Update the transformation & projection matrices
+        updateProgramData(shaderProgram[ShaderProgram::InstancingNormal], lightPosition);
+
+        // Update instances and bind the instancing buffer
+        updateInstanceData();
+        
+        bindTextures(loadedTextures[LoadedTextures::CheckerBoard], loadedTextures[LoadedTextures::Blue], loadedTextures[LoadedTextures::Grey], loadedTextures[LoadedTextures::White]);
+        
+        glBindVertexArray(cube->GetVAO());
+        glDrawElementsInstanced(GL_TRIANGLES, cube->GetIBOSize(), GL_UNSIGNED_INT, reinterpret_cast<void*>(0), numCubes);
+
+        // Unbind the instancing buffer
+        glBindBufferBase(GL_UNIFORM_BUFFER, 1, 0);
+    }
+
+    // --------------------------------------------------------------------------
 
     // Unbind the shader program and other resources
     glBindVertexArray(0);
     glUseProgram(0);
-  }
-  else
-  {
-    // Just copy the render target to the screen
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
-    glDrawBuffer(GL_BACK);
-    glBlitFramebuffer(0, 0, mainWindow.width, mainWindow.height, 0, 0, mainWindow.width, mainWindow.height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-  }
+
+    //glReadBuffer(GL_COLOR_ATTACHMENT0);
+    //glBindTexture(GL_TEXTURE_2D, sobelColor);
+    //glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 0, 0, mainWindow.width, mainWindow.height, 0);
+    //glReadBuffer(GL_DEPTH_ATTACHMENT);
+    //glBindTexture(GL_TEXTURE_2D, sobelDepth);
+    //glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, 0, 0, mainWindow.width, mainWindow.height, 0);
 }
 
 // Helper method for implementing the application main loop
@@ -890,8 +1110,13 @@ void mainLoop()
     // Process keyboard input
     processInput(dt);
 
-    // Render the scene
+    // Render the normal buffer, depth. Bind them to allocated textures
+    renderBuffers();
+    
+    // Render the scene (actual visuals, cel shaded, Sobel edges)
     renderScene();
+
+    displayFramebuffer();
 
     // Swap actual buffers on the GPU
     glfwSwapBuffers(mainWindow.handle);

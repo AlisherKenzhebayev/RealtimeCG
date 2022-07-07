@@ -72,6 +72,7 @@ out VertexData
   vec3 bitangent;
   vec3 normal;
   vec4 worldPos;
+  vec4 vsPos;
 } vOut;
 
 void main()
@@ -92,6 +93,7 @@ void main()
 
   // We must multiply from the left because of transposed worldToView
   vec4 viewPos = vec4(vOut.worldPos * worldToView, 1.0f);
+  vOut.vsPos = projection * viewPos;
 
   gl_Position = projection * viewPos;
 }
@@ -145,6 +147,7 @@ out VertexData
   vec3 bitangent;
   vec3 normal;
   vec4 worldPos;
+  vec4 vsPos;
 } vOut;
 
 void main()
@@ -168,6 +171,7 @@ void main()
   // Transform vertex position, note we multiply from the left because of transposed modelToWorld
   vOut.worldPos = vec4(vec4(position.xyz, 1.0f) * modelToWorld, 1.0f);
   vec4 viewPos = vec4(vOut.worldPos * worldToView, 1.0f);
+  vOut.vsPos = projection * viewPos;
 
   gl_Position = projection * viewPos;
 }
@@ -253,6 +257,8 @@ layout (binding = 0) uniform sampler2D Diffuse;
 layout (binding = 1) uniform sampler2D Normal;
 layout (binding = 2) uniform sampler2D Specular;
 layout (binding = 3) uniform sampler2D Occlusion;
+layout (binding = 4) uniform sampler2D WsNormal;
+layout (binding = 5) uniform sampler2D DepthMap;
 
 // Note: explicit location because AMD APU drivers screw up position when linking against
 // the default vertex shader with mat4x3 modelToWorld at location 0 occupying 4 slots
@@ -262,6 +268,8 @@ layout (location = 4) uniform vec3 lightPosWS;
 // View position in world space coordinates
 layout (location = 5) uniform vec4 viewPosWS;
 
+layout (location = 6) uniform int light_levels;
+
 // Fragment shader inputs
 in VertexData
 {
@@ -270,6 +278,7 @@ in VertexData
   vec3 bitangent;
   vec3 normal;
   vec4 worldPos;
+  vec4 vsPos;
 } vIn;
 
 // Fragment shader outputs
@@ -279,12 +288,18 @@ void main()
 {
   // Normally you'd pass this as another uniform
   vec3 lightColor = vec3(15.0f, 15.0f, 15.0f);
+  vec3 edgeColor = vec3(1.0f, 0.2f, 0.2f);
+    
+  vec3 projCoords = vIn.vsPos.xyz / vIn.vsPos.w;
+  projCoords = projCoords * 0.5 + 0.5;
 
   // Sample textures
   vec3 albedo = texture(Diffuse, vIn.texCoord.st).rgb;
   vec3 noSample = texture(Normal, vIn.texCoord.st).rgb;
   float specSample = texture(Specular, vIn.texCoord.st).r;
   float occlusion = texture(Occlusion, vIn.texCoord.st).r;
+  float depth = texture(DepthMap, projCoords.st).r;
+  vec3 wsnormal = texture(WsNormal, projCoords.st).rgb;
 
   // Calculate world-space normal
   mat3 STN = {vIn.tangent, vIn.bitangent, vIn.normal};
@@ -304,6 +319,10 @@ void main()
   // Calculate diffuse and specular coefficients
   float NdotL = max(0.0f, dot(normal, lightDir));
   float NdotH = max(0.0f, dot(normal, halfDir));
+
+  // Quantize the diffuse coefficients to adhere to a toon-styled lighting
+    float toon_scale_factor = 1.0f / light_levels;    
+    NdotL = ceil ( NdotL * light_levels) * toon_scale_factor;
 
   // Calculate horizon fading factor
   float horizon = clamp(1.0f + dot(vIn.normal, lightDir), 0.0f, 1.0f);
@@ -327,13 +346,16 @@ void main()
   diffuse *= attenuation;
   specular *= attenuation;
 
+  float sobelEdge = 0.0f; // TODO:
+  vec3 edge = edgeColor * sobelEdge;
+
   // Calculate the final color
-  vec3 finalColor = albedo * (ambient + diffuse) + specular;
-  color = vec4(finalColor, 1.0f);
+  vec3 finalColor = albedo * (ambient + diffuse) + specular + edge;
+  color = vec4( depth.xxx, 1.0f);
 }
 )",
 // ----------------------------------------------------------------------------
-// world-space Normal map fragment shader source
+// world-space normal map (-1,1 -> 0,1) fragment shader source
 // ----------------------------------------------------------------------------
 R"(
 #version 330 core
@@ -344,19 +366,8 @@ R"(
 // The following is not not needed since GLSL version #420
 #extension GL_ARB_shading_language_420pack : require
 
-// Texture sampler
-layout (binding = 0) uniform sampler2D Diffuse;
-layout (binding = 1) uniform sampler2D Normal;
-layout (binding = 2) uniform sampler2D Specular;
-layout (binding = 3) uniform sampler2D Occlusion;
-
 // Note: explicit location because AMD APU drivers screw up position when linking against
 // the default vertex shader with mat4x3 modelToWorld at location 0 occupying 4 slots
-
-// Light position/direction
-layout (location = 4) uniform vec3 lightPosWS;
-// View position in world space coordinates
-layout (location = 5) uniform vec4 viewPosWS;
 
 // Fragment shader inputs
 in VertexData
@@ -366,6 +377,7 @@ in VertexData
   vec3 bitangent;
   vec3 normal;
   vec4 worldPos;
+  vec4 vsPos;
 } vIn;
 
 // Fragment shader outputs
@@ -373,20 +385,7 @@ layout (location = 0) out vec4 color;
 
 void main()
 {
-  // Normally you'd pass this as another uniform
-  vec3 lightColor = vec3(15.0f, 15.0f, 15.0f);
-
-  // Sample textures
-  vec3 albedo = texture(Diffuse, vIn.texCoord.st).rgb;
-  vec3 noSample = texture(Normal, vIn.texCoord.st).rgb;
-  float specSample = texture(Specular, vIn.texCoord.st).r;
-  float occlusion = texture(Occlusion, vIn.texCoord.st).r;
-
-  // Calculate world-space normal
-  mat3 STN = {vIn.tangent, vIn.bitangent, vIn.normal};
-  vec3 normal = STN * (noSample * 2.0f - 1.0f);
-
-  color = vec4(normal, 1.0f);
+  color = vec4(vIn.normal / 2.0f + vec3(0.5f), 0.0f);
 }
 )",
 // ----------------------------------------------------------------------------

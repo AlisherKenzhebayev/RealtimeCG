@@ -46,6 +46,7 @@
     <ClInclude Include="..\include\Textures.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="main.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
