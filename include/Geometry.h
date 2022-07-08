@@ -33,6 +33,9 @@ public:
   // Create regular icosahedron with just positions
   static Mesh<Vertex_Pos> *CreateIcosahedron();
 
+  // Create sphere
+  static Mesh<Vertex_Pos_Nrm_Tgt_Tex> *CreateSphere(float radius, unsigned int rings, unsigned int sectors);
+
 private:
   Geometry();
   ~Geometry();

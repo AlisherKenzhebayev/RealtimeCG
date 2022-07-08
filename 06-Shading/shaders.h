@@ -351,7 +351,7 @@ void main()
 
   // Calculate the final color
   vec3 finalColor = albedo * (ambient + diffuse) + specular + edge;
-  color = vec4( wsnormal.xyz, 1.0f);
+  color = vec4( finalColor, 1.0f);
 }
 )",
 // ----------------------------------------------------------------------------

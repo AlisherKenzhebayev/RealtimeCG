@@ -3,7 +3,10 @@
  * Licensed under the zlib license, see LICENSE.txt in the root directory.
  */
 
+#define _USE_MATH_DEFINES
+
 #include "Geometry.h"
+#include <math.h>
 
 #include <glm/glm.hpp>
 
@@ -556,6 +559,91 @@ Mesh<Vertex_Pos_Nrm> *Geometry::CreateTetrahedron()
   Mesh<Vertex_Pos_Nrm> *mesh = new Mesh<Vertex_Pos_Nrm>();
   mesh->Init(vb, ib);
   return mesh;
+}
+
+Mesh<Vertex_Pos_Nrm_Tgt_Tex>* Geometry::CreateSphere(float radius, unsigned int rings, unsigned int sectors)
+{
+    float const R = 1. / (float)(rings - 1);
+    float const S = 1. / (float)(sectors - 1);
+    int r, s;
+
+    std::vector<Vertex_Pos_Nrm_Tgt_Tex> vb;
+    vb.reserve(rings * sectors);
+
+
+    // Courtesy of https://answers.unity.com/questions/133680/how-do-you-find-the-tangent-from-a-given-normal.html
+    // A bit reworked, as order of indices was wrong.
+    for (r = 0; r < rings; r++){
+        for (s = 0; s < sectors; s++) {
+            float const y = sin(-M_PI_2 + M_PI * r * R);
+            float const x = cos(2 * M_PI * s * S) * sin(M_PI * r * R);
+            float const z = sin(2 * M_PI * s * S) * sin(M_PI * r * R);
+
+            Vertex_Pos_Nrm_Tgt_Tex vert = Vertex_Pos_Nrm_Tgt_Tex();
+            vert.u = s * S;
+            vert.v = r * R;
+
+            vert.x = x * radius;
+            vert.y = y * radius;
+            vert.z = z * radius;
+
+            glm::vec3 n = glm::vec3(x, y, z);
+            vert.nx = n.x;
+            vert.ny = n.y;
+            vert.nz = n.z;
+
+            glm::vec3 e0 = glm::vec3(0, 0, 1);
+            glm::vec3 e1 = glm::vec3(0, 1, 0);
+            glm::vec3 t;
+            glm::vec3 t0 = glm::cross(glm::vec3(x, y, z), e0);
+            glm::vec3 t1 = glm::cross(glm::vec3(x, y, z), e1);
+            if (t0.length > t1.length) {
+                t = t0;
+            }
+            else {
+                t = t1;
+            }
+            t = glm::normalize(t);
+
+            vert.tx = t.x;
+            vert.ty = t.y;
+            vert.tz = t.z;
+            vb.push_back(vert);
+        }
+    }
+
+    std::vector<GLuint> ib;
+    ib.reserve(rings * sectors * 6);
+    for (r = 0; r < rings; r++) {
+        for (s = 0; s < sectors; s++) {
+            //ib.push_back(r * sectors + s);
+            //ib.push_back(r * sectors + (s + 1));
+            //ib.push_back((r + 1) * sectors + (s + 1));
+            //ib.push_back((r + 1) * sectors + s);
+            if (r < rings - 1) {
+                int curRow = r * sectors;
+                int nextRow = (r + 1) * sectors;
+                int nextS = (s + 1) % sectors;
+
+                ib.push_back(nextRow + s);
+                ib.push_back(curRow + s);
+                ib.push_back(nextRow + nextS);
+
+                ib.push_back(nextRow + nextS);
+                ib.push_back(curRow + s);
+                ib.push_back(curRow + nextS);
+
+                //ib.push_back((r + 1) * sectors + s);
+                //ib.push_back((r + 1) * sectors + (s + 1));
+                //ib.push_back(r * sectors + (s + 1));
+                //ib.push_back(r * sectors + s);
+            }
+        }
+    }
+
+    Mesh<Vertex_Pos_Nrm_Tgt_Tex>* mesh = new Mesh<Vertex_Pos_Nrm_Tgt_Tex>();
+    mesh->Init(vb, ib);
+    return mesh;
 }
 
 Mesh<Vertex_Pos> *Geometry::CreateIcosahedron()

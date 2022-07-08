@@ -97,7 +97,7 @@ static const unsigned int MAX_TEXT_LENGTH = 256;
 // MSAA samples
 static const GLsizei MSAA_SAMPLES = 4;
 // Used MSAA samples
-GLsizei msaaLevel = MSAA_SAMPLES;
+GLsizei msaaLevel = 1;
 
 // Number of cubes in the scene
 const int numCubes = 10;
@@ -110,7 +110,10 @@ Camera camera;
 // Quad instance
 Mesh<Vertex_Pos_Nrm_Tgt_Tex> *quad = nullptr;
 // Cube instance
-Mesh<Vertex_Pos_Nrm_Tgt_Tex> *cube = nullptr;
+Mesh<Vertex_Pos_Nrm_Tgt_Tex>* cube = nullptr;
+// Icosahedron instance
+Mesh<Vertex_Pos_Nrm_Tgt_Tex>* ico = nullptr;
+
 // Textures helper instance
 Textures& textures(Textures::GetInstance());
 
@@ -137,7 +140,7 @@ bool depthTest = true;
 // Draw wireframe?
 bool wireframe = false;
 // Tonemapping on?
-bool tonemapping = true;
+bool tonemapping = false;
 // Instancing buffer handle
 GLuint instancingBuffer = 0;
 // Transformation matrices uniform buffer object
@@ -333,6 +336,7 @@ void createGeometry()
   // Prepare meshes
   quad = Geometry::CreateQuadNormalTangentTex();
   cube = Geometry::CreateCubeNormalTangentTex();
+  ico = Geometry::CreateSphere(1, 12, 24);
 
   {
     // Generate the instancing buffer as Uniform Buffer Object
@@ -687,6 +691,8 @@ void shutDown()
   quad = nullptr;
   delete cube;
   cube = nullptr;
+  delete ico;
+  ico = nullptr;
 
   // Release the instancing buffer
   glDeleteBuffers(1, &instancingBuffer);
@@ -914,6 +920,22 @@ void renderScene()
 
     glBindVertexArray(quad->GetVAO());
     glDrawElements(GL_TRIANGLES, quad->GetIBOSize(), GL_UNSIGNED_INT, reinterpret_cast<void*>(0));
+  }
+
+  // --------------------------------------------------------------------------
+
+  // Draw the icosahedron:
+  {
+      glUseProgram(shaderProgram[ShaderProgram::Default]);
+      updateProgramData(shaderProgram[ShaderProgram::Default], lightPosition);
+
+      glm::mat4x3 transformation = glm::translate(glm::vec3(2.0f, 1.0f, 0.0f));
+      glUniformMatrix4x3fv(0, 1, GL_FALSE, glm::value_ptr(transformation));
+
+      bindTextures(loadedTextures[LoadedTextures::Diffuse], loadedTextures[LoadedTextures::Normal], loadedTextures[LoadedTextures::Specular], loadedTextures[LoadedTextures::Occlusion]);
+
+      glBindVertexArray(ico->GetVAO());
+      glDrawElements(GL_TRIANGLES, ico->GetIBOSize(), GL_UNSIGNED_INT, reinterpret_cast<void*>(0));
   }
 
   // --------------------------------------------------------------------------
