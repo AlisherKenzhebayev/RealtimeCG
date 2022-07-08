@@ -284,6 +284,39 @@ in VertexData
 // Fragment shader outputs
 layout (location = 0) out vec4 color;
 
+float intensity(in vec4 color){
+	return sqrt((color.x*color.x)+(color.y*color.y)+(color.z*color.z));
+}
+
+void make_kernel(inout vec4 n[9], sampler2D tex, vec2 coord)
+{
+    vec2 texelSize = 1.0 / textureSize(tex, 0);	
+
+    float w = texelSize.x;
+    float h = texelSize.y;
+
+    n[0] = texture2D(tex, coord + vec2( -w, -h));
+    n[1] = texture2D(tex, coord + vec2(0.0, -h));
+    n[2] = texture2D(tex, coord + vec2(  w, -h));
+    n[3] = texture2D(tex, coord + vec2( -w, 0.0));
+    n[4] = texture2D(tex, coord);
+    n[5] = texture2D(tex, coord + vec2(  w, 0.0));
+    n[6] = texture2D(tex, coord + vec2( -w, h));
+    n[7] = texture2D(tex, coord + vec2(0.0, h));
+    n[8] = texture2D(tex, coord + vec2(  w, h));
+}
+
+float calculate_kernel(in vec4 n[9], float threshold)
+{
+    vec4 sobel_edge_h = n[2] + (2.0*n[5]) + n[8] - (n[0] + (2.0*n[3]) + n[6]);
+  	vec4 sobel_edge_v = n[0] + (2.0*n[1]) + n[2] - (n[6] + (2.0*n[7]) + n[8]);
+	vec4 sobel = sqrt((sobel_edge_h * sobel_edge_h) + (sobel_edge_v * sobel_edge_v));
+    
+    if(intensity(sobel) >= threshold)
+        return 1.0f;
+    return 0.0f;
+}
+
 void main()
 {
   // Normally you'd pass this as another uniform
@@ -346,12 +379,22 @@ void main()
   diffuse *= attenuation;
   specular *= attenuation;
 
-  float sobelEdge = 0.0f; // TODO:
-  vec3 edge = edgeColor * sobelEdge;
+    // SOBEL
+    vec4 n[9];
+  
+    // Calculate sobel for normal
+    make_kernel(n, WsNormal, projCoords.st);
+    float sobelNormal = calculate_kernel(n, 0.5f);
+    vec3 edge = sobelNormal * edgeColor;
+    
+    // Calculate sobel for depth    
+    make_kernel(n, DepthMap, projCoords.st);
+    float sobelDepth = calculate_kernel(n, 0.01f);
+    edge += sobelDepth * edgeColor;
 
-  // Calculate the final color
-  vec3 finalColor = albedo * (ambient + diffuse) + specular + edge;
-  color = vec4( finalColor, 1.0f);
+    // Calculate the final color
+    vec3 finalColor = albedo * (ambient + diffuse) + specular + edge;
+    color = vec4( finalColor, 1.0f);
 }
 )",
 // ----------------------------------------------------------------------------

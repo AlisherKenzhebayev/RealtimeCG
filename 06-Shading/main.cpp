@@ -60,7 +60,7 @@ float nearClipPlane = 0.1f;
 float farClipPlane = 100.1f;
 // Camera FOV
 float fov = 45.0f;
-int toon_light_levels = 4;
+int toon_light_levels = 2;
 
 // ----------------------------------------------------------------------------
 
@@ -285,8 +285,8 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
   if (key == GLFW_KEY_RIGHT)
   {
       toon_light_levels += 1;
-      if (toon_light_levels > 99) {
-          toon_light_levels = 40;
+      if (toon_light_levels > 10) {
+          toon_light_levels = 2;
       }
   }
 
@@ -924,7 +924,7 @@ void renderScene()
 
   // --------------------------------------------------------------------------
 
-  // Draw the icosahedron:
+  // Draw the sphere:
   {
       glUseProgram(shaderProgram[ShaderProgram::Default]);
       updateProgramData(shaderProgram[ShaderProgram::Default], lightPosition);
@@ -1073,6 +1073,22 @@ void renderBuffers()
 
         glBindVertexArray(quad->GetVAO());
         glDrawElements(GL_TRIANGLES, quad->GetIBOSize(), GL_UNSIGNED_INT, reinterpret_cast<void*>(0));
+    }
+
+    // --------------------------------------------------------------------------
+    
+    // Draw the sphere:
+    {
+        glUseProgram(shaderProgram[ShaderProgram::DefaultNormal]);
+        updateProgramData(shaderProgram[ShaderProgram::DefaultNormal], lightPosition);
+
+        glm::mat4x3 transformation = glm::translate(glm::vec3(2.0f, 1.0f, 0.0f));
+        glUniformMatrix4x3fv(0, 1, GL_FALSE, glm::value_ptr(transformation));
+
+        bindTextures(loadedTextures[LoadedTextures::Diffuse], loadedTextures[LoadedTextures::Normal], loadedTextures[LoadedTextures::Specular], loadedTextures[LoadedTextures::Occlusion]);
+
+        glBindVertexArray(ico->GetVAO());
+        glDrawElements(GL_TRIANGLES, ico->GetIBOSize(), GL_UNSIGNED_INT, reinterpret_cast<void*>(0));
     }
 
     // --------------------------------------------------------------------------
