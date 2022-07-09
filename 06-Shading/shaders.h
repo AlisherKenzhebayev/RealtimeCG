@@ -381,18 +381,19 @@ void main()
 
     // SOBEL
     vec4 n[9];
-  
+    vec3 edge = vec3(0.0f);
+
     // Calculate sobel for normal
     make_kernel(n, WsNormal, projCoords.st);
-    float sobelNormal = calculate_kernel(n, 0.5f);
-    vec3 edge = sobelNormal * edgeColor;
+    float sobelNormal = calculate_kernel(n, 0.6f);
+    edge += sobelNormal * edgeColor;
     
-    // Calculate sobel for depth    
+    // Calculate sobel intensity for depth (downside is that the depth is not linear, so results in weird only-closeup edges)
     make_kernel(n, DepthMap, projCoords.st);
-    float sobelDepth = calculate_kernel(n, 0.01f);
+    float sobelDepth = calculate_kernel(n, 0.1f);
     edge += sobelDepth * edgeColor;
 
-    // Calculate the final color
+    // Calculate the final color + additive blend of edge colors
     vec3 finalColor = albedo * (ambient + diffuse) + specular + edge;
     color = vec4( finalColor, 1.0f);
 }
